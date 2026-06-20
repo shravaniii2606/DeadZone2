@@ -40,6 +40,9 @@ const LOCAL_READINGS_KEY = "deadzone.localReadings";
 type ReadingPayload = Partial<Reading> & {
   lat?: number | string;
   lng?: number | string;
+  reading_id?: string;
+  operator_name?: string;
+  timestamp?: string;
 };
 
 function normalizeReading(reading: ReadingPayload | null | undefined): Reading | null {
@@ -53,13 +56,16 @@ function normalizeReading(reading: ReadingPayload | null | undefined): Reading |
   }
 
   return {
-    id: reading.id ?? `${latitude}-${longitude}-${Date.now()}`,
+    id:
+      reading.id ??
+      reading.reading_id ??
+      `${latitude}-${longitude}-${Date.now()}`,
     latitude,
     longitude,
     signal_strength: signalStrength,
     network_type: reading.network_type ?? "unknown",
-    operator: reading.operator ?? "unknown",
-    created_at: reading.created_at ?? new Date().toISOString(),
+    operator: reading.operator ?? reading.operator_name ?? "unknown",
+    created_at: reading.created_at ?? reading.timestamp ?? new Date().toISOString(),
     gps_accuracy: reading.gps_accuracy ?? null,
     download_speed: reading.download_speed ?? null,
     latency: reading.latency ?? null,
@@ -205,7 +211,8 @@ export default function MapPage() {
   const [status, setStatus] = useState("Ready");
   const [focusPoint, setFocusPoint] = useState<[number, number] | null>(null);
   const [networkGeneration, setNetworkGeneration] = useState<NetworkGeneration>("AUTO");
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const lastLoggedLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     setReadings(loadLocalReadings());
@@ -237,7 +244,29 @@ export default function MapPage() {
     }
   }
 
+  function getDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const R = 6371000; // meters
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
   async function logReading(lat: number, lng: number, gpsAccuracy = 10) {
+    const lastLocation = lastLoggedLocationRef.current;
+    if (lastLocation) {
+      const moved = getDistanceMeters(lastLocation.lat, lastLocation.lng, lat, lng);
+      if (moved < 10) {
+        setStatus(`Awaiting movement (${Math.round(moved)}m)`);
+        return;
+      }
+    }
+
     const networkType = resolveNetworkGeneration(networkGeneration);
     const downlink = getDownlink();
     const latency = getLatency();
@@ -288,6 +317,7 @@ export default function MapPage() {
         created_at: new Date().toISOString(),
       });
       if (savedReading) {
+        lastLoggedLocationRef.current = { lat: savedReading.latitude, lng: savedReading.longitude };
         setReadings((current) => [
           { ...savedReading, synced: true },
           ...current.filter((reading) => reading.id !== savedReading.id && reading.id !== localReading?.id),
@@ -317,24 +347,25 @@ export default function MapPage() {
     setLogging(true);
     setStatus("Getting GPS fix");
 
-    navigator.geolocation.getCurrentPosition(
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         logReading(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
-        setStatus("Logging every 10 seconds");
-        intervalRef.current = setInterval(() => {
-          navigator.geolocation.getCurrentPosition(
-            (nextPos) => logReading(nextPos.coords.latitude, nextPos.coords.longitude, nextPos.coords.accuracy),
-            (error) => setStatus(getGpsErrorMessage(error)),
-            GPS_OPTIONS
-          );
-        }, 10000);
       },
       (error) => {
         setStatus(getGpsErrorMessage(error));
         setLogging(false);
       },
-      GPS_OPTIONS
+      { ...GPS_OPTIONS, maximumAge: 0 }
     );
+  }
+
+  function stopLogging() {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setLogging(false);
+    setStatus("Session ended");
   }
 
   function stopLogging() {

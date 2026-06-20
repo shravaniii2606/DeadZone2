@@ -18,7 +18,7 @@ export default function LandingPage() {
           <p className="hero-copy">
             DeadZone helps you map community signal readings, analyze coverage areas, and compare route connectivity across Mumbai.
           </p>
-          <button className="primary-button launch-button" onClick={() => navigate('/map')}>
+          <button className="primary-button launch-button" onClick={() => navigate('/login')}>
             Launch App
           </button>
         </div>

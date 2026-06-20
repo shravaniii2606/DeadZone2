@@ -1,5 +1,7 @@
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
+import type { ReactNode } from "react";
 import LandingPage from "./pages/LandingPage";
+import LoginPage from "./pages/LoginPage";
 import MapPage from "./pages/MapPage";
 import StatsPage from "./pages/StatsPage";
 import ReportPage from "./pages/ReportPage";
@@ -13,9 +15,18 @@ const navItems = [
   { to: "/route", label: "Route Planner", shortLabel: "Route", marker: "R" },
 ];
 
+function RequireAuth({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const loggedIn = localStorage.getItem("deadzone-auth") === "true";
+  if (!loggedIn) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  return children;
+}
+
 function AppShell() {
   const location = useLocation();
-  const hideNav = location.pathname === "/";
+  const hideNav = location.pathname === "/" || location.pathname === "/login";
 
   return (
     <div className="app-shell">
@@ -48,10 +59,12 @@ function AppShell() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/map" element={<MapPage />} />
-          <Route path="/stats" element={<StatsPage />} />
-          <Route path="/report" element={<ReportPage />} />
-          <Route path="/route" element={<RoutePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/map" element={<RequireAuth><MapPage /></RequireAuth>} />
+          <Route path="/stats" element={<RequireAuth><StatsPage /></RequireAuth>} />
+          <Route path="/report" element={<RequireAuth><ReportPage /></RequireAuth>} />
+          <Route path="/route" element={<RequireAuth><RoutePage /></RequireAuth>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
 
