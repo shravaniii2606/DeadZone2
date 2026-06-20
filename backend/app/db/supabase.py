@@ -1,13 +1,7 @@
-from supabase import create_client, Client
-from dotenv import load_dotenv
 import os
+from supabase import create_client, Client
 
-load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Missing SUPABASE_URL or SUPABASE_KEY in .env")
+SUPABASE_URL = "https://hetacocqvgcejycwglwd.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhldGFjb2NxdmdjZWp5Y3dnbHdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4ODE1MzgsImV4cCI6MjA5NzQ1NzUzOH0.28GaaaeYEsX3GF0Dnt_hryF1z0YlL1_YUi4lQpFzvKE"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
