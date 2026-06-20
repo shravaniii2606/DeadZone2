@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleMarker, MapContainer, Popup, TileLayer, useMapEvents } from "react-leaflet";
+import { CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../api";
 
@@ -27,6 +27,27 @@ const signalLegend = [
   { label: "Dead Zone", color: "#6b7280", range: "< -110 dBm" },
 ];
 
+function normalizeReading(reading: Partial<Reading> | null | undefined): Reading | null {
+  if (!reading) return null;
+  const latitude = Number(reading.latitude);
+  const longitude = Number(reading.longitude);
+  const signalStrength = Number(reading.signal_strength);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(signalStrength)) {
+    return null;
+  }
+
+  return {
+    id: reading.id ?? `${latitude}-${longitude}-${Date.now()}`,
+    latitude,
+    longitude,
+    signal_strength: signalStrength,
+    network_type: reading.network_type ?? "unknown",
+    operator: reading.operator ?? "unknown",
+    created_at: reading.created_at ?? new Date().toISOString(),
+  };
+}
+
 function getSignalColor(dbm: number): string {
   if (dbm >= -70) return "#22c55e";
   if (dbm >= -85) return "#84cc16";
@@ -52,11 +73,23 @@ function MapClickHandler({ onAreaClick }: { onAreaClick: (lat: number, lng: numb
   return null;
 }
 
+function MapFocusHandler({ focus }: { focus: [number, number] | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!focus) return;
+    map.flyTo(focus, Math.max(map.getZoom(), 15), { duration: 0.8 });
+  }, [focus, map]);
+
+  return null;
+}
+
 export default function MapPage() {
   const [readings, setReadings] = useState<Reading[]>([]);
   const [logging, setLogging] = useState(false);
   const [sessionCount, setSessionCount] = useState(0);
   const [status, setStatus] = useState("Ready");
+  const [focusPoint, setFocusPoint] = useState<[number, number] | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -68,7 +101,13 @@ export default function MapPage() {
   async function fetchHeatmap() {
     try {
       const res = await api.getHeatmap();
-      if (res.success) setReadings(res.data);
+      if (res.success && Array.isArray(res.data)) {
+        setReadings(
+          (res.data as Partial<Reading>[])
+            .map(normalizeReading)
+            .filter((reading): reading is Reading => Boolean(reading))
+        );
+      }
     } catch (e) {
       console.error("Heatmap fetch failed", e);
     }
@@ -95,7 +134,7 @@ export default function MapPage() {
   async function logReading(lat: number, lng: number) {
     const signal = getSignalStrength();
     try {
-      await api.submitReading({
+      const res = await api.submitReading({
         latitude: lat,
         longitude: lng,
         signal_strength: signal,
@@ -104,6 +143,21 @@ export default function MapPage() {
         device_type: /Android/i.test(navigator.userAgent) ? "android" : "other",
         gps_accuracy: 10,
       });
+      const savedReading = normalizeReading(res.data) ?? normalizeReading({
+        latitude: lat,
+        longitude: lng,
+        signal_strength: signal,
+        network_type: getNetworkType(),
+        operator: "unknown",
+        created_at: new Date().toISOString(),
+      });
+      if (savedReading) {
+        setReadings((current) => [
+          savedReading,
+          ...current.filter((reading) => reading.id !== savedReading.id),
+        ]);
+        setFocusPoint([savedReading.latitude, savedReading.longitude]);
+      }
       setSessionCount((c) => c + 1);
       setStatus(`Logged - ${getSignalLabel(signal)}`);
       fetchHeatmap();
@@ -207,6 +261,7 @@ export default function MapPage() {
         <MapContainer center={[19.076, 72.8777]} zoom={12} style={{ height: "100%", width: "100%", background: "#0a0f0a" }}>
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" attribution='&copy; <a href="https://carto.com/">CARTO</a>' />
           <MapClickHandler onAreaClick={handleAreaClick} />
+          <MapFocusHandler focus={focusPoint} />
           {readings.map((r) => (
             <CircleMarker
               key={r.id}
