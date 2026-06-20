@@ -42,7 +42,7 @@ export default function MapPage() {
   const [readings, setReadings] = useState<Reading[]>([]);
   const [logging, setLogging] = useState(false);
   const [sessionCount, setSessionCount] = useState(0);
-  const [currentSignal, setCurrentSignal] = useState<number | null>(null);
+  const [, setCurrentSignal] = useState<number | null>(null);
   const [status, setStatus] = useState("Ready");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
