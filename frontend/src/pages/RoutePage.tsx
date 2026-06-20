@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 
 interface Route {
@@ -29,10 +29,24 @@ async function geocode(place: string): Promise<{ lat: number; lng: number } | nu
       { headers: { "Accept-Language": "en" } }
     );
     const data = await res.json();
-    if (data.length === 0) return null;
+    if (!Array.isArray(data) || data.length === 0) return null;
     return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
   } catch {
     return null;
+  }
+}
+
+async function searchLocations(place: string): Promise<Array<{ display_name: string; lat: number; lon: number }>> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=5&countrycodes=in`,
+      { headers: { "Accept-Language": "en" } }
+    );
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data.map((item: any) => ({ display_name: item.display_name, lat: parseFloat(item.lat), lon: parseFloat(item.lon) }));
+  } catch {
+    return [];
   }
 }
 
@@ -114,6 +128,58 @@ export default function RoutePage() {
   const [resolvedTo, setResolvedTo] = useState("");
   const [aiInsight, setAiInsight] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [fromSuggestions, setFromSuggestions] = useState<Array<{ display_name: string; lat: number; lon: number }>>([]);
+  const [toSuggestions, setToSuggestions] = useState<Array<{ display_name: string; lat: number; lon: number }>>([]);
+  const [showFromSuggestions, setShowFromSuggestions] = useState(false);
+  const [showToSuggestions, setShowToSuggestions] = useState(false);
+  const fromSearchTimeout = useRef<number | null>(null);
+  const toSearchTimeout = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!fromPlace.trim()) {
+      setFromSuggestions([]);
+      setShowFromSuggestions(false);
+      return;
+    }
+
+    if (fromSearchTimeout.current) {
+      window.clearTimeout(fromSearchTimeout.current);
+    }
+
+    fromSearchTimeout.current = window.setTimeout(async () => {
+      if (fromPlace.trim().length < 3) {
+        setFromSuggestions([]);
+        setShowFromSuggestions(false);
+        return;
+      }
+      const results = await searchLocations(fromPlace.trim());
+      setFromSuggestions(results);
+      setShowFromSuggestions(results.length > 0);
+    }, 250);
+  }, [fromPlace]);
+
+  useEffect(() => {
+    if (!toPlace.trim()) {
+      setToSuggestions([]);
+      setShowToSuggestions(false);
+      return;
+    }
+
+    if (toSearchTimeout.current) {
+      window.clearTimeout(toSearchTimeout.current);
+    }
+
+    toSearchTimeout.current = window.setTimeout(async () => {
+      if (toPlace.trim().length < 3) {
+        setToSuggestions([]);
+        setShowToSuggestions(false);
+        return;
+      }
+      const results = await searchLocations(toPlace.trim());
+      setToSuggestions(results);
+      setShowToSuggestions(results.length > 0);
+    }, 250);
+  }, [toPlace]);
 
   async function getMyLocation() {
     if (!navigator.geolocation) {
@@ -196,16 +262,64 @@ export default function RoutePage() {
 
       <section className="panel">
         <div className="route-form">
-          <label className="field">
+          <label className="field autocomplete-field">
             <span>From</span>
-            <input type="text" value={fromPlace} onChange={(e) => setFromPlace(e.target.value)} placeholder="Borivali Station, Mumbai" />
+            <input
+              type="text"
+              value={fromPlace}
+              onChange={(e) => setFromPlace(e.target.value)}
+              onFocus={() => setShowFromSuggestions(fromSuggestions.length > 0)}
+              onBlur={() => window.setTimeout(() => setShowFromSuggestions(false), 150)}
+              placeholder="Borivali Station, Mumbai"
+            />
+            {showFromSuggestions && fromSuggestions.length > 0 && (
+              <div className="autocomplete-list">
+                {fromSuggestions.map((suggestion, index) => (
+                  <button
+                    key={`${suggestion.lat}-${suggestion.lon}-${index}`}
+                    type="button"
+                    className="autocomplete-item"
+                    onMouseDown={() => {
+                      setFromPlace(suggestion.display_name);
+                      setShowFromSuggestions(false);
+                    }}
+                  >
+                    {suggestion.display_name}
+                  </button>
+                ))}
+              </div>
+            )}
           </label>
           <button className="secondary-button location-button" onClick={getMyLocation} disabled={gettingGPS}>
             {gettingGPS ? "Getting GPS..." : "Use My Location"}
           </button>
-          <label className="field">
+          <label className="field autocomplete-field">
             <span>To</span>
-            <input type="text" value={toPlace} onChange={(e) => setToPlace(e.target.value)} placeholder="SFIT Borivali, Mumbai" />
+            <input
+              type="text"
+              value={toPlace}
+              onChange={(e) => setToPlace(e.target.value)}
+              onFocus={() => setShowToSuggestions(toSuggestions.length > 0)}
+              onBlur={() => window.setTimeout(() => setShowToSuggestions(false), 150)}
+              placeholder="SFIT Borivali, Mumbai"
+            />
+            {showToSuggestions && toSuggestions.length > 0 && (
+              <div className="autocomplete-list">
+                {toSuggestions.map((suggestion, index) => (
+                  <button
+                    key={`${suggestion.lat}-${suggestion.lon}-${index}`}
+                    type="button"
+                    className="autocomplete-item"
+                    onMouseDown={() => {
+                      setToPlace(suggestion.display_name);
+                      setShowToSuggestions(false);
+                    }}
+                  >
+                    {suggestion.display_name}
+                  </button>
+                ))}
+              </div>
+            )}
           </label>
         </div>
 

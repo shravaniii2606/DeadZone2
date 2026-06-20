@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 
 interface BreakdownItem {
@@ -35,6 +35,7 @@ const BREAKDOWN_COLORS: Record<string, string> = {
 };
 
 export default function ReportPage() {
+  const [location, setLocation] = useState("");
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
   const [radius, setRadius] = useState("100");
@@ -42,6 +43,60 @@ export default function ReportPage() {
   const [result, setResult] = useState<ReportResult | null>(null);
   const [error, setError] = useState("");
   const [usingGPS, setUsingGPS] = useState(false);
+  const [suggestions, setSuggestions] = useState<Array<{ display_name: string; lat: number; lon: number }>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchTimeout = useRef<number | null>(null);
+
+  async function geocode(place: string): Promise<{ lat: number; lng: number } | null> {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1&countrycodes=in`,
+        { headers: { "Accept-Language": "en" } }
+      );
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) return null;
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    } catch {
+      return null;
+    }
+  }
+
+  async function searchLocations(place: string) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=5&countrycodes=in`,
+        { headers: { "Accept-Language": "en" } }
+      );
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) return [];
+      return data.map((item: any) => ({ display_name: item.display_name, lat: parseFloat(item.lat), lon: parseFloat(item.lon) }));
+    } catch {
+      return [];
+    }
+  }
+
+  useEffect(() => {
+    if (!location.trim()) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    if (searchTimeout.current) {
+      window.clearTimeout(searchTimeout.current);
+    }
+
+    searchTimeout.current = window.setTimeout(async () => {
+      if (location.trim().length < 3) {
+        setSuggestions([]);
+        setShowSuggestions(false);
+        return;
+      }
+      const results = await searchLocations(location.trim());
+      setSuggestions(results);
+      setShowSuggestions(results.length > 0);
+    }, 250);
+  }, [location]);
 
   async function fetchMyLocation() {
     if (!navigator.geolocation) {
@@ -57,7 +112,7 @@ export default function ReportPage() {
         setUsingGPS(false);
       },
       () => {
-        setError("Could not get your location. You can still type coordinates manually.");
+        setError("Could not get your location. You can still type coordinates manually or enter a place name.");
         setUsingGPS(false);
       },
       { enableHighAccuracy: true, timeout: 8000 }
@@ -65,14 +120,41 @@ export default function ReportPage() {
   }
 
   async function fetchReport() {
-    if (!lat || !lng) {
-      setError("Enter coordinates or use your current location first.");
-      return;
-    }
     setError("");
     setLoading(true);
+
+    let targetLat = lat;
+    let targetLng = lng;
+
+    if (location) {
+      const geo = await geocode(location);
+      if (!geo) {
+        setError(`Could not find "${location}". Try a more specific place name or add Mumbai.`);
+        setLoading(false);
+        return;
+      }
+      targetLat = geo.lat.toFixed(6);
+      targetLng = geo.lng.toFixed(6);
+      setLat(targetLat);
+      setLng(targetLng);
+    }
+
+    if (!targetLat || !targetLng) {
+      setError("Enter a place name, coordinates, or use your current location first.");
+      setLoading(false);
+      return;
+    }
+
+    const parsedLat = parseFloat(targetLat);
+    const parsedLng = parseFloat(targetLng);
+    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
+      setError("Enter valid coordinates or a valid place name.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      const res = await api.getAreaReport(parseFloat(lat), parseFloat(lng), parseInt(radius));
+      const res = await api.getAreaReport(parsedLat, parsedLng, parseInt(radius));
       if (res.success) {
         setResult(res);
       } else {
@@ -116,6 +198,39 @@ export default function ReportPage() {
         </div>
 
         <div className="form-grid">
+          <label className="field autocomplete-field">
+            <span>Location</span>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => {
+                setLocation(e.target.value);
+              }}
+              onFocus={() => setShowSuggestions(suggestions.length > 0)}
+              onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
+              placeholder="Borivali Station, Mumbai"
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="autocomplete-list">
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    key={`${suggestion.lat}-${suggestion.lon}-${index}`}
+                    type="button"
+                    className="autocomplete-item"
+                    onMouseDown={() => {
+                      setLocation(suggestion.display_name);
+                      setLat(suggestion.lat.toFixed(6));
+                      setLng(suggestion.lon.toFixed(6));
+                      setSuggestions([]);
+                      setShowSuggestions(false);
+                    }}
+                  >
+                    {suggestion.display_name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </label>
           <label className="field">
             <span>Latitude</span>
             <input type="number" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="19.218300" />
