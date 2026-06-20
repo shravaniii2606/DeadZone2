@@ -26,11 +26,11 @@ async def submit_reading(reading: SignalReading):
 
 
 @router.get("/heatmap")
-async def get_heatmap(limit: int = 500):
+async def get_heatmap(limit: int = 10000):
     try:
         result = (
             supabase.table("signal_readings")
-            .select("id, latitude, longitude, signal_strength, network_type, operator, created_at")
+            .select("id, latitude, longitude, signal_strength, network_type, operator, gps_accuracy, download_speed, latency, created_at")
             .order("created_at", desc=True)
             .limit(limit)
             .execute()

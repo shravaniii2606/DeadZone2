@@ -9,6 +9,8 @@ type NavigatorWithConnection = Navigator & {
   };
 };
 
+type NetworkGeneration = "AUTO" | "3G" | "4G" | "5G";
+
 function getSignalLabel(dbm: number) {
   if (dbm >= -70) return { label: "Excellent", color: "#22c55e", desc: "High-speed connection" };
   if (dbm >= -85) return { label: "Good", color: "#84cc16", desc: "Stable everyday coverage" };
@@ -17,32 +19,62 @@ function getSignalLabel(dbm: number) {
   return { label: "Dead Zone", color: "#6b7280", desc: "No usable signal" };
 }
 
-function getSignalStrength(): number {
-  const conn = (navigator as NavigatorWithConnection).connection;
-  if (conn) {
-    const type = conn.effectiveType;
-    if (type === "4g") return Math.floor(Math.random() * 15) - 68;
-    if (type === "3g") return Math.floor(Math.random() * 15) - 88;
-    if (type === "2g") return Math.floor(Math.random() * 10) - 103;
-    return -115;
-  }
-  return Math.floor(Math.random() * 40) - 90;
-}
+function resolveNetworkGeneration(override: NetworkGeneration): string {
+  if (override !== "AUTO") return override;
 
-function getNetworkType(): string {
   const conn = (navigator as NavigatorWithConnection).connection;
   if (conn?.effectiveType) return conn.effectiveType.toUpperCase();
-  return "4G";
+  return "UNKNOWN";
+}
+
+function estimateSignalStrength(networkType: string, downlink: number, latency: number): number {
+  const baseByNetwork: Record<string, number> = {
+    "5G": -65,
+    "4G": -75,
+    "3G": -90,
+    "2G": -105,
+    "SLOW-2G": -112,
+  };
+  const base = baseByNetwork[networkType] ?? -95;
+  const speedBoost = Math.min(12, Math.round(downlink * 1.5));
+  const latencyPenalty = latency > 0 ? Math.min(18, Math.round(latency / 25)) : 5;
+  return Math.max(-120, Math.min(-55, base + speedBoost - latencyPenalty));
 }
 
 function getDownlink(): number {
   const conn = (navigator as NavigatorWithConnection).connection;
-  return conn?.downlink ?? parseFloat((Math.random() * 20 + 2).toFixed(1));
+  return conn?.downlink ?? 0;
 }
 
 function getRtt(): number {
   const conn = (navigator as NavigatorWithConnection).connection;
-  return conn?.rtt ?? Math.floor(Math.random() * 60 + 20);
+  return conn?.rtt ?? 0;
+}
+
+const GPS_OPTIONS: PositionOptions = {
+  enableHighAccuracy: true,
+  maximumAge: 30000,
+  timeout: 20000,
+};
+
+function getGpsErrorMessage(error: GeolocationPositionError): string {
+  if (!window.isSecureContext) {
+    return "GPS needs HTTPS or localhost";
+  }
+
+  if (error.code === error.PERMISSION_DENIED) {
+    return "Location permission denied";
+  }
+
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return "GPS position unavailable";
+  }
+
+  if (error.code === error.TIMEOUT) {
+    return "GPS timed out, try again";
+  }
+
+  return "GPS error";
 }
 
 export default function StatsPage() {
@@ -52,7 +84,8 @@ export default function StatsPage() {
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [downlink, setDownlink] = useState<number>(0);
   const [rtt, setRtt] = useState<number>(0);
-  const [networkType, setNetworkType] = useState("4G");
+  const [networkGeneration, setNetworkGeneration] = useState<NetworkGeneration>("AUTO");
+  const [networkType, setNetworkType] = useState("UNKNOWN");
   const [history, setHistory] = useState<number[]>([]);
   const [status, setStatus] = useState("Idle");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -64,10 +97,10 @@ export default function StatsPage() {
   }, []);
 
   function updateStats() {
-    const s = getSignalStrength();
     const d = getDownlink();
     const r = getRtt();
-    const n = getNetworkType();
+    const n = resolveNetworkGeneration(networkGeneration);
+    const s = estimateSignalStrength(n, d, r);
     setSignal(s);
     setDownlink(d);
     setRtt(r);
@@ -76,7 +109,12 @@ export default function StatsPage() {
     return { s, d, r, n };
   }
 
-  async function logToBackend(lat: number, lng: number, snapshot = { s: signal, d: downlink, r: rtt, n: networkType }) {
+  async function logToBackend(
+    lat: number,
+    lng: number,
+    gpsAccuracyValue: number,
+    snapshot = { s: signal, d: downlink, r: rtt, n: networkType }
+  ) {
     try {
       await api.submitReading({
         latitude: lat,
@@ -85,7 +123,7 @@ export default function StatsPage() {
         network_type: snapshot.n,
         operator: "unknown",
         device_type: /Android/i.test(navigator.userAgent) ? "android" : "other",
-        gps_accuracy: gpsAccuracy ?? 10,
+        gps_accuracy: gpsAccuracyValue,
         download_speed: snapshot.d,
         latency: snapshot.r,
       });
@@ -101,10 +139,10 @@ export default function StatsPage() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setGpsAccuracy(pos.coords.accuracy);
-        logToBackend(pos.coords.latitude, pos.coords.longitude, snapshot);
+        logToBackend(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, snapshot);
       },
-      () => setStatus("GPS error"),
-      { enableHighAccuracy: true, timeout: 5000 }
+      (error) => setStatus(getGpsErrorMessage(error)),
+      GPS_OPTIONS
     );
   }
 
@@ -113,10 +151,29 @@ export default function StatsPage() {
       setStatus("GPS not supported");
       return;
     }
+
+    if (!window.isSecureContext) {
+      setStatus("GPS needs HTTPS or localhost");
+      return;
+    }
+
     setLogging(true);
-    setStatus("Logging every 5 seconds");
-    collectOnce();
-    intervalRef.current = setInterval(collectOnce, 5000);
+    setStatus("Getting GPS fix");
+
+    const snapshot = updateStats();
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGpsAccuracy(pos.coords.accuracy);
+        logToBackend(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, snapshot);
+        setStatus("Logging every 5 seconds");
+        intervalRef.current = setInterval(collectOnce, 5000);
+      },
+      (error) => {
+        setStatus(getGpsErrorMessage(error));
+        setLogging(false);
+      },
+      GPS_OPTIONS
+    );
   }
 
   function stopLogging() {
@@ -143,6 +200,15 @@ export default function StatsPage() {
           <p className="hero-copy">Start a logging session to capture live signal, GPS accuracy, speed, and latency readings.</p>
         </div>
         <div className="hero-actions">
+          <label className="network-picker">
+            <span>Network</span>
+            <select value={networkGeneration} onChange={(e) => setNetworkGeneration(e.target.value as NetworkGeneration)} disabled={logging}>
+              <option value="AUTO">Auto</option>
+              <option value="3G">3G</option>
+              <option value="4G">4G</option>
+              <option value="5G">5G</option>
+            </select>
+          </label>
           <div className={`status-pill ${logging ? "active" : ""}`}>
             <span aria-hidden="true" />
             {status}
