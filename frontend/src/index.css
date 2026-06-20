@@ -328,6 +328,36 @@ select option {
   white-space: nowrap;
 }
 
+.network-picker {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(34, 197, 94, 0.42);
+  border-radius: var(--radius);
+  background: rgba(8, 14, 11, 0.8);
+  padding: 6px 8px 6px 12px;
+}
+
+.network-picker span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.network-picker select {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  padding: 6px 28px 6px 9px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .status-pill span {
   width: 8px;
   height: 8px;
@@ -1014,10 +1044,15 @@ select option {
   }
 
   .hero-actions,
+  .network-picker,
   .primary-button,
   .secondary-button,
   .status-pill {
     width: 100%;
+  }
+
+  .network-picker select {
+    flex: 1;
   }
 
   .legend-item {

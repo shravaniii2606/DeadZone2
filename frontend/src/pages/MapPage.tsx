@@ -11,13 +11,21 @@ interface Reading {
   network_type: string;
   operator: string;
   created_at: string;
+  gps_accuracy?: number | null;
+  download_speed?: number | null;
+  latency?: number | null;
+  synced?: boolean;
 }
 
 type NavigatorWithConnection = Navigator & {
   connection?: {
     effectiveType?: string;
+    downlink?: number;
+    rtt?: number;
   };
 };
+
+type NetworkGeneration = "AUTO" | "3G" | "4G" | "5G";
 
 const signalLegend = [
   { label: "Excellent", color: "#22c55e", range: ">= -70 dBm" },
@@ -27,10 +35,17 @@ const signalLegend = [
   { label: "Dead Zone", color: "#6b7280", range: "< -110 dBm" },
 ];
 
-function normalizeReading(reading: Partial<Reading> | null | undefined): Reading | null {
+const LOCAL_READINGS_KEY = "deadzone.localReadings";
+
+type ReadingPayload = Partial<Reading> & {
+  lat?: number | string;
+  lng?: number | string;
+};
+
+function normalizeReading(reading: ReadingPayload | null | undefined): Reading | null {
   if (!reading) return null;
-  const latitude = Number(reading.latitude);
-  const longitude = Number(reading.longitude);
+  const latitude = Number(reading.latitude ?? reading.lat);
+  const longitude = Number(reading.longitude ?? reading.lng);
   const signalStrength = Number(reading.signal_strength);
 
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(signalStrength)) {
@@ -45,7 +60,48 @@ function normalizeReading(reading: Partial<Reading> | null | undefined): Reading
     network_type: reading.network_type ?? "unknown",
     operator: reading.operator ?? "unknown",
     created_at: reading.created_at ?? new Date().toISOString(),
+    gps_accuracy: reading.gps_accuracy ?? null,
+    download_speed: reading.download_speed ?? null,
+    latency: reading.latency ?? null,
+    synced: reading.synced ?? true,
   };
+}
+
+function mergeReadings(primary: Reading[], secondary: Reading[]): Reading[] {
+  const seen = new Set<string>();
+  const merged: Reading[] = [];
+
+  [...primary, ...secondary].forEach((reading) => {
+    if (seen.has(reading.id)) return;
+    seen.add(reading.id);
+    merged.push(reading);
+  });
+
+  return merged;
+}
+
+function loadLocalReadings(): Reading[] {
+  try {
+    const stored = window.localStorage.getItem(LOCAL_READINGS_KEY);
+    if (!stored) return [];
+
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map(normalizeReading)
+      .filter((reading): reading is Reading => Boolean(reading));
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalReadings(readings: Reading[]) {
+  try {
+    window.localStorage.setItem(LOCAL_READINGS_KEY, JSON.stringify(readings));
+  } catch {
+    // Storage can fail in private mode or when the quota is full.
+  }
 }
 
 function getSignalColor(dbm: number): string {
@@ -62,6 +118,64 @@ function getSignalLabel(dbm: number): string {
   if (dbm >= -100) return "Moderate";
   if (dbm >= -110) return "Weak";
   return "Dead Zone";
+}
+
+function resolveNetworkGeneration(override: NetworkGeneration): string {
+  if (override !== "AUTO") return override;
+
+  const conn = (navigator as NavigatorWithConnection).connection;
+  if (conn?.effectiveType) return conn.effectiveType.toUpperCase();
+  return "UNKNOWN";
+}
+
+function getDownlink(): number {
+  const conn = (navigator as NavigatorWithConnection).connection;
+  return conn?.downlink ?? 0;
+}
+
+function getLatency(): number {
+  const conn = (navigator as NavigatorWithConnection).connection;
+  return conn?.rtt ?? 0;
+}
+
+function estimateSignalStrength(networkType: string, downlink: number, latency: number): number {
+  const baseByNetwork: Record<string, number> = {
+    "5G": -65,
+    "4G": -75,
+    "3G": -90,
+    "2G": -105,
+    "SLOW-2G": -112,
+  };
+  const base = baseByNetwork[networkType] ?? -95;
+  const speedBoost = Math.min(12, Math.round(downlink * 1.5));
+  const latencyPenalty = latency > 0 ? Math.min(18, Math.round(latency / 25)) : 5;
+  return Math.max(-120, Math.min(-55, base + speedBoost - latencyPenalty));
+}
+
+const GPS_OPTIONS: PositionOptions = {
+  enableHighAccuracy: true,
+  maximumAge: 30000,
+  timeout: 20000,
+};
+
+function getGpsErrorMessage(error: GeolocationPositionError): string {
+  if (!window.isSecureContext) {
+    return "GPS needs HTTPS or localhost";
+  }
+
+  if (error.code === error.PERMISSION_DENIED) {
+    return "Location permission denied";
+  }
+
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return "GPS position unavailable";
+  }
+
+  if (error.code === error.TIMEOUT) {
+    return "GPS timed out, try again";
+  }
+
+  return "GPS error";
 }
 
 function MapClickHandler({ onAreaClick }: { onAreaClick: (lat: number, lng: number) => void }) {
@@ -90,71 +204,93 @@ export default function MapPage() {
   const [sessionCount, setSessionCount] = useState(0);
   const [status, setStatus] = useState("Ready");
   const [focusPoint, setFocusPoint] = useState<[number, number] | null>(null);
+  const [networkGeneration, setNetworkGeneration] = useState<NetworkGeneration>("AUTO");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    setReadings(loadLocalReadings());
     fetchHeatmap();
     const refresh = setInterval(fetchHeatmap, 15000);
     return () => clearInterval(refresh);
   }, []);
 
+  useEffect(() => {
+    saveLocalReadings(readings);
+  }, [readings]);
+
   async function fetchHeatmap() {
     try {
       const res = await api.getHeatmap();
       if (res.success && Array.isArray(res.data)) {
-        setReadings(
-          (res.data as Partial<Reading>[])
+        const serverReadings = (res.data as ReadingPayload[])
             .map(normalizeReading)
             .filter((reading): reading is Reading => Boolean(reading))
-        );
+            .map((reading) => ({ ...reading, synced: true }));
+
+        setReadings((current) => mergeReadings(
+          current,
+          serverReadings
+        ));
       }
     } catch (e) {
       console.error("Heatmap fetch failed", e);
     }
   }
 
-  function getSignalStrength(): number {
-    const conn = (navigator as NavigatorWithConnection).connection;
-    if (conn) {
-      const type = conn.effectiveType;
-      if (type === "4g") return -65;
-      if (type === "3g") return -85;
-      if (type === "2g") return -100;
-      return -110;
+  async function logReading(lat: number, lng: number, gpsAccuracy = 10) {
+    const networkType = resolveNetworkGeneration(networkGeneration);
+    const downlink = getDownlink();
+    const latency = getLatency();
+    const signal = estimateSignalStrength(networkType, downlink, latency);
+    const localReading = normalizeReading({
+      id: `local-${Date.now()}-${Math.round(lat * 100000)}-${Math.round(lng * 100000)}`,
+      latitude: lat,
+      longitude: lng,
+      signal_strength: signal,
+      network_type: networkType,
+      operator: "unknown",
+      gps_accuracy: gpsAccuracy,
+      download_speed: downlink,
+      latency,
+      created_at: new Date().toISOString(),
+      synced: false,
+    });
+
+    if (localReading) {
+      setReadings((current) => mergeReadings([localReading], current));
+      setFocusPoint([localReading.latitude, localReading.longitude]);
     }
-    return Math.floor(Math.random() * 40) - 90;
-  }
 
-  function getNetworkType(): string {
-    const conn = (navigator as NavigatorWithConnection).connection;
-    if (conn?.effectiveType) return conn.effectiveType.toUpperCase();
-    return "4G";
-  }
-
-  async function logReading(lat: number, lng: number) {
-    const signal = getSignalStrength();
     try {
       const res = await api.submitReading({
         latitude: lat,
         longitude: lng,
         signal_strength: signal,
-        network_type: getNetworkType(),
+        network_type: networkType,
         operator: "unknown",
         device_type: /Android/i.test(navigator.userAgent) ? "android" : "other",
-        gps_accuracy: 10,
+        gps_accuracy: gpsAccuracy,
+        download_speed: downlink,
+        latency,
       });
+      if (!res.success) {
+        throw new Error(res.detail ?? "Reading was not saved");
+      }
       const savedReading = normalizeReading(res.data) ?? normalizeReading({
         latitude: lat,
         longitude: lng,
         signal_strength: signal,
-        network_type: getNetworkType(),
+        network_type: networkType,
         operator: "unknown",
+        gps_accuracy: gpsAccuracy,
+        download_speed: downlink,
+        latency,
         created_at: new Date().toISOString(),
       });
       if (savedReading) {
         setReadings((current) => [
-          savedReading,
-          ...current.filter((reading) => reading.id !== savedReading.id),
+          { ...savedReading, synced: true },
+          ...current.filter((reading) => reading.id !== savedReading.id && reading.id !== localReading?.id),
         ]);
         setFocusPoint([savedReading.latitude, savedReading.longitude]);
       }
@@ -162,7 +298,8 @@ export default function MapPage() {
       setStatus(`Logged - ${getSignalLabel(signal)}`);
       fetchHeatmap();
     } catch {
-      setStatus("Log failed");
+      setSessionCount((c) => c + 1);
+      setStatus(`Mapped locally - ${getSignalLabel(signal)}`);
     }
   }
 
@@ -171,22 +308,33 @@ export default function MapPage() {
       setStatus("Geolocation not supported");
       return;
     }
+
+    if (!window.isSecureContext) {
+      setStatus("GPS needs HTTPS or localhost");
+      return;
+    }
+
     setLogging(true);
-    setStatus("Logging every 10 seconds");
+    setStatus("Getting GPS fix");
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => logReading(pos.coords.latitude, pos.coords.longitude),
-      () => setStatus("GPS error"),
-      { enableHighAccuracy: true, timeout: 5000 }
+      (pos) => {
+        logReading(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+        setStatus("Logging every 10 seconds");
+        intervalRef.current = setInterval(() => {
+          navigator.geolocation.getCurrentPosition(
+            (nextPos) => logReading(nextPos.coords.latitude, nextPos.coords.longitude, nextPos.coords.accuracy),
+            (error) => setStatus(getGpsErrorMessage(error)),
+            GPS_OPTIONS
+          );
+        }, 10000);
+      },
+      (error) => {
+        setStatus(getGpsErrorMessage(error));
+        setLogging(false);
+      },
+      GPS_OPTIONS
     );
-
-    intervalRef.current = setInterval(() => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => logReading(pos.coords.latitude, pos.coords.longitude),
-        () => setStatus("GPS error"),
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    }, 10000);
   }
 
   function stopLogging() {
@@ -210,6 +358,15 @@ export default function MapPage() {
           </p>
         </div>
         <div className="hero-actions">
+          <label className="network-picker">
+            <span>Network</span>
+            <select value={networkGeneration} onChange={(e) => setNetworkGeneration(e.target.value as NetworkGeneration)} disabled={logging}>
+              <option value="AUTO">Auto</option>
+              <option value="3G">3G</option>
+              <option value="4G">4G</option>
+              <option value="5G">5G</option>
+            </select>
+          </label>
           <div className={`status-pill ${logging ? "active" : ""}`}>
             <span aria-hidden="true" />
             {status}
@@ -279,7 +436,11 @@ export default function MapPage() {
                   <strong style={{ color: getSignalColor(r.signal_strength) }}>{getSignalLabel(r.signal_strength)}</strong>
                   <p>Signal: {r.signal_strength} dBm</p>
                   <p>Network: {r.network_type}</p>
+                  {r.download_speed !== null && r.download_speed !== undefined && <p>Downlink: {r.download_speed} Mbps</p>}
+                  {r.latency !== null && r.latency !== undefined && <p>Latency: {r.latency} ms</p>}
+                  {r.gps_accuracy !== null && r.gps_accuracy !== undefined && <p>GPS: {r.gps_accuracy.toFixed(1)} m</p>}
                   <p>Operator: {r.operator}</p>
+                  {!r.synced && <p>Saved on this device</p>}
                   <small>{new Date(r.created_at).toLocaleString()}</small>
                 </div>
               </Popup>
