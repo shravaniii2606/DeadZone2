@@ -22,7 +22,7 @@ function getZoneColor(label: string): string {
     case "moderate": return "#f59e0b";
     case "weak": return "#ef4444";
     case "dead": return "#6b7280";
-    default: return "#a3b899";
+    default: return "#a7b8ad";
   }
 }
 
@@ -44,7 +44,11 @@ export default function ReportPage() {
   const [usingGPS, setUsingGPS] = useState(false);
 
   async function fetchMyLocation() {
-    if (!navigator.geolocation) { setError("GPS not supported"); return; }
+    if (!navigator.geolocation) {
+      setError("GPS is not supported in this browser.");
+      return;
+    }
+    setError("");
     setUsingGPS(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -52,13 +56,19 @@ export default function ReportPage() {
         setLng(pos.coords.longitude.toFixed(6));
         setUsingGPS(false);
       },
-      () => { setError("Could not get location"); setUsingGPS(false); },
+      () => {
+        setError("Could not get your location. You can still type coordinates manually.");
+        setUsingGPS(false);
+      },
       { enableHighAccuracy: true, timeout: 8000 }
     );
   }
 
   async function fetchReport() {
-    if (!lat || !lng) { setError("Enter coordinates or use GPS"); return; }
+    if (!lat || !lng) {
+      setError("Enter coordinates or use your current location first.");
+      return;
+    }
     setError("");
     setLoading(true);
     try {
@@ -66,274 +76,109 @@ export default function ReportPage() {
       if (res.success) {
         setResult(res);
       } else {
-        setError("Failed to fetch report");
+        setError("No report was returned for this area.");
       }
     } catch {
-      setError("API error — is backend running?");
+      setError("API error. Check that the backend is running.");
     }
     setLoading(false);
   }
 
   const breakdownItems: BreakdownItem[] = result
-    ? Object.entries(result.breakdown).map(([key, pct]) => ({
-        label: key.charAt(0).toUpperCase() + key.slice(1),
-        color: BREAKDOWN_COLORS[key] ?? "#a3b899",
-        pct: pct as number,
-      })).sort((a, b) => b.pct - a.pct)
+    ? Object.entries(result.breakdown)
+        .map(([key, pct]) => ({
+          label: key.charAt(0).toUpperCase() + key.slice(1),
+          color: BREAKDOWN_COLORS[key] ?? "#a7b8ad",
+          pct: pct as number,
+        }))
+        .sort((a, b) => b.pct - a.pct)
     : [];
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl mx-auto">
-      {/* Header */}
-      <div style={{
-        background: "rgba(20,28,20,0.6)",
-        border: "1px solid rgba(34,197,94,0.18)",
-        borderLeft: "4px solid #22c55e",
-        borderRadius: "16px",
-        padding: "24px 28px",
-      }}>
-        <p style={{ color: "#22c55e", fontSize: "11px", fontWeight: 800, letterSpacing: "1.5px", textTransform: "uppercase", marginBottom: "6px" }}>
-          Area Network Report
-        </p>
-        <h1 style={{ fontSize: "2rem", fontWeight: 800, color: "#fff", letterSpacing: "-0.5px" }}>
-          Signal Area Analysis
-        </h1>
-        <p style={{ color: "#a3b899", marginTop: "6px", fontSize: "14px" }}>
-          Get a signal breakdown for any location within a selected radius
-        </p>
-      </div>
+    <div className="page-stack narrow">
+      <section className="page-hero">
+        <div>
+          <p className="eyebrow">Area Network Report</p>
+          <h1>Signal Area Analysis</h1>
+          <p className="hero-copy">Choose a point and radius to see whether nearby readings show strong coverage or dead zones.</p>
+        </div>
+      </section>
 
-      {/* Input card */}
-      <div style={{
-        background: "rgba(20,28,20,0.6)",
-        border: "1px solid rgba(34,197,94,0.18)",
-        borderRadius: "16px",
-        padding: "28px",
-      }}>
-        <p style={{ color: "#fff", fontWeight: 700, fontSize: "16px", marginBottom: "20px" }}>
-          Enter Location
-        </p>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-          {/* Lat */}
+      <section className="panel">
+        <div className="section-heading">
           <div>
-            <label style={{ color: "#a3b899", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "8px" }}>
-              Latitude
-            </label>
-            <input
-              type="number"
-              value={lat}
-              onChange={(e) => setLat(e.target.value)}
-              placeholder="19.2183"
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                background: "rgba(10,15,10,0.7)",
-                border: "1px solid rgba(34,197,94,0.18)",
-                borderRadius: "12px",
-                color: "#fff",
-                fontSize: "14px",
-                outline: "none",
-              }}
-            />
+            <p className="panel-kicker">Step 1</p>
+            <h2>Pick a location</h2>
           </div>
+          <button className="secondary-button" onClick={fetchMyLocation} disabled={usingGPS}>
+            {usingGPS ? "Getting GPS..." : "Use My Location"}
+          </button>
+        </div>
 
-          {/* Lng */}
-          <div>
-            <label style={{ color: "#a3b899", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "8px" }}>
-              Longitude
-            </label>
-            <input
-              type="number"
-              value={lng}
-              onChange={(e) => setLng(e.target.value)}
-              placeholder="72.9781"
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                background: "rgba(10,15,10,0.7)",
-                border: "1px solid rgba(34,197,94,0.18)",
-                borderRadius: "12px",
-                color: "#fff",
-                fontSize: "14px",
-                outline: "none",
-              }}
-            />
-          </div>
-
-          {/* Radius */}
-          <div>
-            <label style={{ color: "#a3b899", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "8px" }}>
-              Radius (meters)
-            </label>
-            <select
-              value={radius}
-              onChange={(e) => setRadius(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                background: "rgba(10,15,10,0.7)",
-                border: "1px solid rgba(34,197,94,0.18)",
-                borderRadius: "12px",
-                color: "#fff",
-                fontSize: "14px",
-                outline: "none",
-              }}
-            >
-              <option value="50">50m</option>
-              <option value="100">100m</option>
-              <option value="200">200m</option>
-              <option value="500">500m</option>
-              <option value="1000">1km</option>
+        <div className="form-grid">
+          <label className="field">
+            <span>Latitude</span>
+            <input type="number" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="19.218300" />
+          </label>
+          <label className="field">
+            <span>Longitude</span>
+            <input type="number" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="72.978100" />
+          </label>
+          <label className="field">
+            <span>Radius</span>
+            <select value={radius} onChange={(e) => setRadius(e.target.value)}>
+              <option value="50">50 m</option>
+              <option value="100">100 m</option>
+              <option value="200">200 m</option>
+              <option value="500">500 m</option>
+              <option value="1000">1 km</option>
             </select>
-          </div>
+          </label>
         </div>
 
-        <div style={{ display: "flex", gap: "12px" }}>
-          <button
-            onClick={fetchMyLocation}
-            disabled={usingGPS}
-            style={{
-              padding: "12px 20px",
-              background: "transparent",
-              border: "2px solid #22c55e",
-              borderRadius: "12px",
-              color: "#4ade80",
-              fontWeight: 700,
-              fontSize: "14px",
-              cursor: "pointer",
-              transition: "all 0.2s ease",
-            }}
-          >
-            {usingGPS ? "Getting GPS..." : "📍 Use My Location"}
-          </button>
+        <button className="primary-button full-width" onClick={fetchReport} disabled={loading}>
+          {loading ? "Analyzing..." : "Generate Report"}
+        </button>
+        {error && <p className="error-text">{error}</p>}
+      </section>
 
-          <button
-            onClick={fetchReport}
-            disabled={loading}
-            style={{
-              flex: 1,
-              padding: "12px 24px",
-              background: "linear-gradient(135deg, #22c55e, #16a34a)",
-              border: "none",
-              borderRadius: "12px",
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: "14px",
-              cursor: "pointer",
-              boxShadow: "0 8px 20px rgba(34,197,94,0.2)",
-              transition: "all 0.2s ease",
-            }}
-          >
-            {loading ? "Analyzing..." : "📊 Generate Report"}
-          </button>
-        </div>
-
-        {error && (
-          <p style={{ color: "#ef4444", fontSize: "13px", marginTop: "12px", fontWeight: 600 }}>
-            ⚠ {error}
-          </p>
-        )}
-      </div>
-
-      {/* Result */}
-      {result && (
+      {result ? (
         <>
-          {/* Zone label */}
-          <div style={{
-            background: `${getZoneColor(result.zone_label)}11`,
-            border: `1px solid ${getZoneColor(result.zone_label)}44`,
-            borderRadius: "16px",
-            padding: "28px",
-            textAlign: "center",
-          }}>
-            <p style={{ color: "#a3b899", fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
-              Overall Zone Classification
-            </p>
-            <p style={{ color: getZoneColor(result.zone_label), fontSize: "3rem", fontWeight: 900, lineHeight: 1 }}>
-              {result.zone_label}
-            </p>
-            <p style={{ color: "#a3b899", fontSize: "14px", marginTop: "10px" }}>
-              Based on {result.total} signal {result.total === 1 ? "point" : "points"} within {result.radius_meters}m radius
-            </p>
-          </div>
+          <section className="result-hero" style={{ borderColor: `${getZoneColor(result.zone_label)}55`, background: `${getZoneColor(result.zone_label)}12` }}>
+            <span>Overall Zone</span>
+            <strong style={{ color: getZoneColor(result.zone_label) }}>{result.zone_label}</strong>
+            <p>Based on {result.total} signal {result.total === 1 ? "point" : "points"} within {result.radius_meters} m.</p>
+          </section>
 
-          {/* Breakdown bars */}
-          <div style={{
-            background: "rgba(20,28,20,0.6)",
-            border: "1px solid rgba(34,197,94,0.18)",
-            borderRadius: "16px",
-            padding: "28px",
-          }}>
-            <p style={{ color: "#fff", fontWeight: 700, fontSize: "16px", marginBottom: "20px" }}>
-              Signal Mix Breakdown
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <section className="panel">
+            <p className="panel-kicker">Signal Mix</p>
+            <h2>Coverage breakdown</h2>
+            <div className="breakdown-list">
               {breakdownItems.map((item) => (
                 <div key={item.label}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: item.color, display: "inline-block" }} />
-                      <span style={{ color: "#fff", fontSize: "14px", fontWeight: 600 }}>{item.label}</span>
-                    </div>
-                    <span style={{ color: item.color, fontSize: "14px", fontWeight: 700 }}>{item.pct}%</span>
+                  <div className="bar-label">
+                    <span><i style={{ background: item.color }} />{item.label}</span>
+                    <strong style={{ color: item.color }}>{item.pct}%</strong>
                   </div>
-                  <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "999px", overflow: "hidden" }}>
-                    <div style={{
-                      height: "100%",
-                      width: `${item.pct}%`,
-                      background: item.color,
-                      borderRadius: "999px",
-                      transition: "width 0.6s ease",
-                      boxShadow: `0 0 8px ${item.color}66`,
-                    }} />
+                  <div className="meter-track">
+                    <div style={{ width: `${item.pct}%`, background: item.color }} />
                   </div>
                 </div>
               ))}
             </div>
-          </div>
+          </section>
 
-          {/* Coordinates */}
-          <div style={{
-            background: "rgba(20,28,20,0.4)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: "12px",
-            padding: "16px 20px",
-            display: "flex",
-            gap: "24px",
-            flexWrap: "wrap",
-          }}>
-            <div>
-              <span style={{ color: "#6b7f65", fontSize: "11px", fontWeight: 700, textTransform: "uppercase" }}>Center</span>
-              <p style={{ color: "#fff", fontSize: "14px", fontWeight: 600, marginTop: "4px" }}>
-                {result.center.lat.toFixed(6)}, {result.center.lng.toFixed(6)}
-              </p>
-            </div>
-            <div>
-              <span style={{ color: "#6b7f65", fontSize: "11px", fontWeight: 700, textTransform: "uppercase" }}>Radius</span>
-              <p style={{ color: "#fff", fontSize: "14px", fontWeight: 600, marginTop: "4px" }}>{result.radius_meters}m</p>
-            </div>
-            <div>
-              <span style={{ color: "#6b7f65", fontSize: "11px", fontWeight: 700, textTransform: "uppercase" }}>Data Points</span>
-              <p style={{ color: "#22c55e", fontSize: "14px", fontWeight: 600, marginTop: "4px" }}>{result.total}</p>
-            </div>
-          </div>
+          <section className="details-strip">
+            <div><span>Center</span><strong>{result.center.lat.toFixed(6)}, {result.center.lng.toFixed(6)}</strong></div>
+            <div><span>Radius</span><strong>{result.radius_meters} m</strong></div>
+            <div><span>Data Points</span><strong>{result.total}</strong></div>
+          </section>
         </>
-      )}
-
-      {/* Empty state */}
-      {!result && !loading && (
-        <div style={{
-          background: "rgba(20,28,20,0.4)",
-          border: "1px dashed rgba(34,197,94,0.2)",
-          borderRadius: "16px",
-          padding: "48px",
-          textAlign: "center",
-        }}>
-          <p style={{ fontSize: "40px", marginBottom: "12px" }}>📡</p>
-          <p style={{ color: "#a3b899", fontSize: "16px", fontWeight: 600 }}>No report generated yet</p>
-          <p style={{ color: "#6b7f65", fontSize: "14px", marginTop: "6px" }}>Enter coordinates or use your GPS location above</p>
-        </div>
+      ) : (
+        <section className="empty-state">
+          <strong>No report generated yet</strong>
+          <p>Use your GPS location or enter coordinates, then generate a report.</p>
+        </section>
       )}
     </div>
   );
