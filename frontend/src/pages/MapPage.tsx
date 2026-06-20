@@ -377,24 +377,6 @@ export default function MapPage() {
         </div>
       </section>
 
-      <section className="quick-start">
-        <div className="quick-step">
-          <span>1</span>
-          <strong>Allow GPS</strong>
-          <p>Your browser asks once so DeadZone can place readings accurately.</p>
-        </div>
-        <div className="quick-step">
-          <span>2</span>
-          <strong>Start logging</strong>
-          <p>A reading is saved now and then every 10 seconds until you stop.</p>
-        </div>
-        <div className="quick-step">
-          <span>3</span>
-          <strong>Read the colors</strong>
-          <p>Green is strong coverage, red or gray means weak or dead-zone signal.</p>
-        </div>
-      </section>
-
       <section className="panel toolbar-panel">
         <div>
           <p className="panel-kicker">Map Summary</p>

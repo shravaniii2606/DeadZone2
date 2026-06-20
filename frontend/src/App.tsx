@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
+import LandingPage from "./pages/LandingPage";
 import MapPage from "./pages/MapPage";
 import StatsPage from "./pages/StatsPage";
 import ReportPage from "./pages/ReportPage";
@@ -6,16 +7,19 @@ import RoutePage from "./pages/RoutePage";
 import "./index.css";
 
 const navItems = [
-  { to: "/", label: "Coverage Map", shortLabel: "Map", marker: "M" },
+  { to: "/map", label: "Coverage Map", shortLabel: "Map", marker: "M" },
   { to: "/stats", label: "Live Logging", shortLabel: "Log", marker: "L" },
   { to: "/report", label: "Area Report", shortLabel: "Report", marker: "A" },
   { to: "/route", label: "Route Planner", shortLabel: "Route", marker: "R" },
 ];
 
-export default function App() {
+function AppShell() {
+  const location = useLocation();
+  const hideNav = location.pathname === "/";
+
   return (
-    <BrowserRouter>
-      <div className="app-shell">
+    <div className="app-shell">
+      {!hideNav && (
         <nav className="top-nav" aria-label="Primary navigation">
           <NavLink to="/" className="brand-link" aria-label="DeadZone home">
             <span className="brand-mark">D</span>
@@ -30,7 +34,6 @@ export default function App() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                end={item.to === "/"}
                 className={({ isActive }) => `nav-tab${isActive ? " active" : ""}`}
               >
                 <span className="nav-marker" aria-hidden="true">{item.marker}</span>
@@ -40,20 +43,29 @@ export default function App() {
             ))}
           </div>
         </nav>
+      )}
 
-        <main className="app-main">
-          <Routes>
-            <Route path="/" element={<MapPage />} />
-            <Route path="/stats" element={<StatsPage />} />
-            <Route path="/report" element={<ReportPage />} />
-            <Route path="/route" element={<RoutePage />} />
-          </Routes>
-        </main>
+      <main className="app-main">
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/map" element={<MapPage />} />
+          <Route path="/stats" element={<StatsPage />} />
+          <Route path="/report" element={<ReportPage />} />
+          <Route path="/route" element={<RoutePage />} />
+        </Routes>
+      </main>
 
-        <footer className="app-footer">
-          DeadZone - Crowdsourced Telecom Intelligence - Team Trevana
-        </footer>
-      </div>
+      <footer className="app-footer">
+        DeadZone - Crowdsourced Telecom Intelligence - Team Trevana
+      </footer>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
     </BrowserRouter>
   );
 }
