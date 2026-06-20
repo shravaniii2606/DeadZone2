@@ -368,12 +368,6 @@ export default function MapPage() {
     setStatus("Session ended");
   }
 
-  function stopLogging() {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    setLogging(false);
-    setStatus("Session ended");
-  }
-
   function handleAreaClick(lat: number, lng: number) {
     setStatus(`Selected ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
   }
