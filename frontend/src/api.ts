@@ -24,4 +24,17 @@ export const api = {
     const res = await fetch(`${BASE_URL}/api/route?from_lat=${fromLat}&from_lng=${fromLng}&to_lat=${toLat}&to_lng=${toLng}`);
     return res.json();
   },
+
+  async getRouteInsight(routes: object[], fromPlace: string, toPlace: string) {
+    const res = await fetch(`${BASE_URL}/api/route/insight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ routes, from_place: fromPlace, to_place: toPlace }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Could not generate insight.");
+    }
+    return data;
+  },
 };

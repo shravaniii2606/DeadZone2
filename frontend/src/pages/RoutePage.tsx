@@ -22,7 +22,46 @@ const SIGNAL_COLORS: Record<string, string> = {
 
 const ROUTE_NAMES = ["Route A", "Route B", "Route C"];
 
+const MUMBAI_LANDMARKS: Record<string, { lat: number; lng: number }> = {
+  "sfit": { lat: 19.2090, lng: 72.8610 },
+  "st francis institute of technology": { lat: 19.2090, lng: 72.8610 },
+  "st. francis institute of technology": { lat: 19.2090, lng: 72.8610 },
+  "kandivali station": { lat: 19.2043, lng: 72.8489 },
+  "kandivali": { lat: 19.2043, lng: 72.8489 },
+  "borivali station": { lat: 19.2307, lng: 72.8567 },
+  "borivali": { lat: 19.2307, lng: 72.8567 },
+  "andheri station": { lat: 19.1197, lng: 72.8464 },
+  "andheri": { lat: 19.1197, lng: 72.8464 },
+  "bandra station": { lat: 19.0596, lng: 72.8295 },
+  "bandra": { lat: 19.0596, lng: 72.8295 },
+  "powai": { lat: 19.1176, lng: 72.9060 },
+  "dharavi": { lat: 19.0432, lng: 72.8540 },
+  "dadar station": { lat: 19.0178, lng: 72.8478 },
+  "dadar": { lat: 19.0178, lng: 72.8478 },
+  "kurla station": { lat: 19.0728, lng: 72.8826 },
+  "kurla": { lat: 19.0728, lng: 72.8826 },
+  "colaba": { lat: 18.9067, lng: 72.8147 },
+  "lower parel": { lat: 18.9941, lng: 72.8328 },
+  "malad station": { lat: 19.1862, lng: 72.8481 },
+  "malad": { lat: 19.1862, lng: 72.8481 },
+  "goregaon station": { lat: 19.1663, lng: 72.8526 },
+  "goregaon": { lat: 19.1663, lng: 72.8526 },
+  "thane station": { lat: 19.2183, lng: 72.9781 },
+  "thane": { lat: 19.2183, lng: 72.9781 },
+  "bkc": { lat: 19.0693, lng: 72.8685 },
+  "mankhurd": { lat: 19.0470, lng: 72.9326 },
+};
+
 async function geocode(place: string): Promise<{ lat: number; lng: number } | null> {
+  const key = place.toLowerCase().trim()
+    .replace(", mumbai", "")
+    .replace(",mumbai", "")
+    .trim();
+
+  if (MUMBAI_LANDMARKS[key]) {
+    return MUMBAI_LANDMARKS[key];
+  }
+
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1&countrycodes=in`,
@@ -35,7 +74,6 @@ async function geocode(place: string): Promise<{ lat: number; lng: number } | nu
     return null;
   }
 }
-
 async function searchLocations(place: string): Promise<Array<{ display_name: string; lat: number; lon: number }>> {
   try {
     const res = await fetch(
@@ -49,45 +87,12 @@ async function searchLocations(place: string): Promise<Array<{ display_name: str
     return [];
   }
 }
-
 async function getAIInsight(routes: Route[], from: string, to: string): Promise<string> {
   try {
-    const routeSummary = routes.map((r, i) => `
-      ${ROUTE_NAMES[i]}:
-      - Signal Score: ${r.signal_score}%
-      - Avg Signal: ${r.avg_signal_dbm} dBm
-      - Distance: ${r.distance_km} km
-      - Duration: ${r.duration_min} min
-      - Dead Zone %: ${r.dead_zone_pct}%
-      - Breakdown: ${JSON.stringify(r.breakdown)}
-      - Recommended: ${r.recommended}
-    `).join("\n");
-
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "mistralai/mistral-7b-instruct",
-        messages: [{
-          role: "user",
-          content: `You are a telecom signal analyst. A user wants to travel from "${from}" to "${to}" in Mumbai, India.
-Here is the signal quality data for available routes:
-
-${routeSummary}
-
-Give a short, clear recommendation (3-4 sentences max) explaining which route to take, what connectivity to expect, and any dead-zone warning. Be direct and practical.`,
-        }],
-        max_tokens: 200,
-      }),
-    });
-
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content ?? "Could not generate insight.";
-  } catch {
-    return "AI insight unavailable.";
+    const data = await api.getRouteInsight(routes, from, to);
+    return data.insight ?? data.detail ?? "Could not generate insight.";
+  } catch (err) {
+    return err instanceof Error ? err.message : "AI insight unavailable.";
   }
 }
 

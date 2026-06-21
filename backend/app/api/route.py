@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from app.db.supabase import supabase
+from pydantic import BaseModel
 import httpx
 import os
 
@@ -7,6 +8,15 @@ router = APIRouter()
 
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+
+
+class RouteInsightRequest(BaseModel):
+    routes: list[dict]
+    from_place: str
+    to_place: str
 
 def decode_polyline(polyline_str):
     """Decode Google/ORS encoded polyline to list of [lng, lat]"""
@@ -46,6 +56,24 @@ def classify_signal(dbm: int) -> str:
         return "weak"
     else:
         return "dead"
+
+def build_route_summary(routes: list[dict]) -> str:
+    names = ["Route A", "Route B", "Route C"]
+    lines = []
+
+    for index, route in enumerate(routes):
+        lines.append(f"""
+{names[index] if index < len(names) else f"Route {index + 1}"}:
+- Signal Score: {route.get("signal_score")}%
+- Avg Signal: {route.get("avg_signal_dbm")} dBm
+- Distance: {route.get("distance_km")} km
+- Duration: {route.get("duration_min")} min
+- Dead Zone %: {route.get("dead_zone_pct")}%
+- Breakdown: {route.get("breakdown")}
+- Recommended: {route.get("recommended")}
+""")
+
+    return "\n".join(lines)
 
 async def get_signal_score_for_route(coordinates: list) -> dict:
     scores = []
@@ -133,3 +161,46 @@ async def compare_routes(
         raise HTTPException(status_code=502, detail=f"ORS API error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/route/insight")
+async def route_insight(payload: RouteInsightRequest):
+    if not OPENROUTER_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY not set")
+
+    route_summary = build_route_summary(payload.routes)
+    prompt = f"""You are a telecom signal analyst. A user wants to travel from "{payload.from_place}" to "{payload.to_place}" in Mumbai, India.
+Here is the signal quality data for available routes:
+
+{route_summary}
+
+Give a short, clear recommendation (3-4 sentences max) explaining which route to take, what connectivity to expect, and any dead-zone warning. Be direct and practical."""
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "X-Title": "DeadZone Route Planner",
+    }
+    body = {
+        "model": OPENROUTER_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 200,
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(OPENROUTER_URL, json=body, headers=headers, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+
+        content = data.get("choices", [{}])[0].get("message", {}).get("content")
+        if not content:
+            raise HTTPException(status_code=502, detail="OpenRouter returned no insight")
+
+        return {"success": True, "insight": content}
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text[:300] if e.response is not None else str(e)
+        raise HTTPException(status_code=502, detail=f"OpenRouter API error: {detail}")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"OpenRouter API error: {str(e)}")
