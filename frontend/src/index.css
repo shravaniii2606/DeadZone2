@@ -248,7 +248,8 @@ select option {
 .signal-card,
 .insight-panel,
 .result-hero,
-.map-panel {
+.map-panel,
+.route-map-panel {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--panel);
@@ -590,6 +591,12 @@ select option {
   overflow: hidden;
 }
 
+.route-map-panel {
+  height: min(52vh, 500px);
+  min-height: 360px;
+  overflow: hidden;
+}
+
 .map-popup {
   min-width: 160px;
   color: var(--text);
@@ -614,6 +621,28 @@ select option {
 .leaflet-popup-tip {
   background: #151b18;
   color: var(--text);
+}
+
+.route-point-label {
+  border: 1px solid rgba(34, 197, 94, 0.55);
+  border-radius: 999px;
+  background: rgba(8, 24, 16, 0.92);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  padding: 3px 9px;
+}
+
+.route-point-label.end {
+  border-color: rgba(245, 158, 11, 0.58);
+  background: rgba(31, 20, 6, 0.92);
+  color: #fde68a;
+}
+
+.route-point-label::before {
+  display: none;
 }
 
 .signal-card {
@@ -957,6 +986,24 @@ select option {
   margin-bottom: 0;
 }
 
+.route-results {
+  display: grid;
+  gap: 14px;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-head h2 {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 900;
+}
+
 .route-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
@@ -1160,7 +1207,8 @@ select option {
     width: 100%;
   }
 
-  .map-panel {
+  .map-panel,
+  .route-map-panel {
     min-height: 360px;
   }
 

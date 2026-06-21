@@ -57,13 +57,35 @@ def classify_signal(dbm: int) -> str:
     else:
         return "dead"
 
-def build_route_summary(routes: list[dict]) -> str:
-    names = ["Route A", "Route B", "Route C"]
-    lines = []
+def get_route_name(route: dict) -> str:
+    """Extract main road name from ORS route instructions"""
+    try:
+        segments = route.get("segments", [])
+        if not segments:
+            return "Unnamed Route"
 
+        steps = segments[0].get("steps", [])
+
+        # Pick the step with longest duration (main road)
+        valid_steps = [s for s in steps if s.get("name", "").strip() not in ("", "-")]
+        if not valid_steps:
+            return "Unnamed Route"
+
+        best_step = max(valid_steps, key=lambda s: s.get("duration", 0))
+        main_road = best_step.get("name", "").strip()
+
+        if main_road:
+            return f"Via {main_road}"
+        return "Unnamed Route"
+    except:
+        return "Unnamed Route"
+
+def build_route_summary(routes: list[dict]) -> str:
+    lines = []
     for index, route in enumerate(routes):
+        name = route.get("route_name") or f"Route {index + 1}"
         lines.append(f"""
-{names[index] if index < len(names) else f"Route {index + 1}"}:
+{name}:
 - Signal Score: {route.get("signal_score")}%
 - Avg Signal: {route.get("avg_signal_dbm")} dBm
 - Distance: {route.get("distance_km")} km
@@ -72,7 +94,6 @@ def build_route_summary(routes: list[dict]) -> str:
 - Breakdown: {route.get("breakdown")}
 - Recommended: {route.get("recommended")}
 """)
-
     return "\n".join(lines)
 
 async def get_signal_score_for_route(coordinates: list) -> dict:
@@ -122,7 +143,12 @@ async def compare_routes(
         }
         body = {
             "coordinates": [[from_lng, from_lat], [to_lng, to_lat]],
-            "instructions": False
+            "instructions": True,
+            "alternative_routes": {
+                "target_count": 3,
+                "weight_factor": 1.4,
+                "share_factor": 0.6
+            }
         }
 
         async with httpx.AsyncClient() as client:
@@ -136,19 +162,20 @@ async def compare_routes(
 
         result = []
         for i, r in enumerate(routes):
-            # Decode encoded polyline to coordinates
             coords = decode_polyline(r["geometry"])
             signal_info = await get_signal_score_for_route(coords)
             summary = r["summary"]
 
             result.append({
                 "route_index": i,
+                "route_name": get_route_name(r),
                 "distance_km": round(summary["distance"] / 1000, 2),
                 "duration_min": round(summary["duration"] / 60, 1),
                 "signal_score": signal_info["signal_score"],
                 "avg_signal_dbm": signal_info["avg_signal_dbm"],
                 "dead_zone_pct": signal_info["dead_zone_pct"],
                 "breakdown": signal_info["breakdown"],
+                "path": [[lat, lng] for lng, lat in coords],
                 "recommended": False
             })
 

@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
+import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import { api } from "../api";
 
 interface Route {
   route_index: number;
+  route_name?: string;
   distance_km: number;
   duration_min: number;
   signal_score: number;
   avg_signal_dbm: number;
   dead_zone_pct: number;
   breakdown: Record<string, number>;
+  path?: [number, number][];
   recommended: boolean;
 }
 
@@ -21,6 +25,7 @@ const SIGNAL_COLORS: Record<string, string> = {
 };
 
 const ROUTE_NAMES = ["Route A", "Route B", "Route C"];
+const ROUTE_COLORS = ["#22c55e", "#38bdf8", "#f59e0b", "#f472b6", "#a78bfa"];
 
 const MUMBAI_LANDMARKS: Record<string, { lat: number; lng: number }> = {
   "sfit": { lat: 19.2090, lng: 72.8610 },
@@ -119,6 +124,93 @@ function ScoreRing({ score, color }: { score: number; color: string }) {
         {score}%
       </text>
     </svg>
+  );
+}
+
+function getRouteLineColor(route: Route, index: number): string {
+  if (route.recommended) return "#22c55e";
+  return ROUTE_COLORS[index % ROUTE_COLORS.length];
+}
+
+function RouteMapFocus({ routes }: { routes: Route[] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const coordinates = routes.flatMap((route) => route.path ?? []);
+    if (coordinates.length === 0) return;
+
+    map.fitBounds(coordinates, {
+      padding: [28, 28],
+      maxZoom: 15,
+    });
+  }, [map, routes]);
+
+  return null;
+}
+
+function RouteMap({ routes }: { routes: Route[] }) {
+  const drawableRoutes = routes.filter((route) => route.path && route.path.length > 1);
+  const primaryPath = drawableRoutes[0]?.path ?? [];
+  const start = primaryPath[0];
+  const end = primaryPath[primaryPath.length - 1];
+
+  if (!start || !end) return null;
+
+  return (
+    <section className="route-map-panel">
+      <MapContainer center={start} zoom={13} style={{ height: "100%", width: "100%", background: "#0a0f0a" }}>
+        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" attribution='&copy; <a href="https://carto.com/">CARTO</a>' />
+        <RouteMapFocus routes={routes} />
+
+        {drawableRoutes.map((route, index) => {
+          const color = getRouteLineColor(route, index);
+          const label = route.route_name || ROUTE_NAMES[route.route_index] || `Route ${route.route_index + 1}`;
+
+          return (
+            <Polyline
+              key={route.route_index}
+              positions={route.path ?? []}
+              pathOptions={{
+                color,
+                opacity: route.recommended ? 0.95 : 0.72,
+                weight: route.recommended ? 7 : 5,
+              }}
+            >
+              <Popup>
+                <div className="map-popup">
+                  <strong style={{ color }}>{label}</strong>
+                  <p>{route.recommended ? "Recommended route" : "Alternate route"}</p>
+                  <p>Signal: {route.signal_score}%</p>
+                  <p>Distance: {route.distance_km} km</p>
+                  <p>Duration: {route.duration_min} min</p>
+                </div>
+              </Popup>
+            </Polyline>
+          );
+        })}
+
+        <CircleMarker center={start} radius={11} pathOptions={{ color: "#bbf7d0", fillColor: "#22c55e", fillOpacity: 0.95, weight: 3 }}>
+          <Tooltip permanent direction="top" offset={[0, -10]} className="route-point-label">
+            Start
+          </Tooltip>
+          <Popup>
+            <div className="map-popup">
+              <strong>Start</strong>
+            </div>
+          </Popup>
+        </CircleMarker>
+        <CircleMarker center={end} radius={11} pathOptions={{ color: "#fde68a", fillColor: "#f59e0b", fillOpacity: 0.95, weight: 3 }}>
+          <Tooltip permanent direction="top" offset={[0, -10]} className="route-point-label end">
+            End
+          </Tooltip>
+          <Popup>
+            <div className="map-popup">
+              <strong>Destination</strong>
+            </div>
+          </Popup>
+        </CircleMarker>
+      </MapContainer>
+    </section>
   );
 }
 
@@ -352,47 +444,58 @@ export default function RoutePage() {
         </section>
       )}
 
+      {routes.length > 0 && <RouteMap routes={routes} />}
+
       {routes.length > 0 ? (
-        <section className="route-grid">
-          {routes.map((route) => {
-            const scoreColor = getScoreColor(route.signal_score);
-            return (
-              <article className={`route-card ${route.recommended ? "recommended" : ""}`} key={route.route_index}>
-                <div className="route-card-head">
-                  <div>
-                    <p className="panel-kicker">{ROUTE_NAMES[route.route_index] ?? `Route ${route.route_index + 1}`}</p>
-                    <h2>{route.recommended ? "Best Connectivity" : "Alternate Route"}</h2>
+        <section className="route-results">
+          <div className="section-head">
+            <div>
+              <p className="panel-kicker">Available Routes</p>
+              <h2>{routes.length} route{routes.length === 1 ? "" : "s"} found</h2>
+            </div>
+          </div>
+
+          <div className="route-grid">
+            {routes.map((route) => {
+              const scoreColor = getScoreColor(route.signal_score);
+              return (
+                <article className={`route-card ${route.recommended ? "recommended" : ""}`} key={route.route_index}>
+                  <div className="route-card-head">
+                    <div>
+                      <p className="panel-kicker">{route.route_name || ROUTE_NAMES[route.route_index] || `Route ${route.route_index + 1}`}</p>
+                      <h2>{route.recommended ? "Best Connectivity" : "Alternate Route"}</h2>
+                    </div>
+                    <span className={route.recommended ? "badge good" : "badge warn"}>{route.recommended ? "Recommended" : "Compare"}</span>
                   </div>
-                  <span className={route.recommended ? "badge good" : "badge warn"}>{route.recommended ? "Recommended" : "Compare"}</span>
-                </div>
 
-                <div className="score-row">
-                  <ScoreRing score={route.signal_score} color={scoreColor} />
-                  <div>
-                    <strong style={{ color: scoreColor }}>{route.signal_score}%</strong>
-                    <span>Signal score</span>
-                    <p>Average {route.avg_signal_dbm} dBm</p>
+                  <div className="score-row">
+                    <ScoreRing score={route.signal_score} color={scoreColor} />
+                    <div>
+                      <strong style={{ color: scoreColor }}>{route.signal_score}%</strong>
+                      <span>Signal score</span>
+                      <p>Average {route.avg_signal_dbm} dBm</p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="mini-stats">
-                  <div><span>Distance</span><strong>{route.distance_km} km</strong></div>
-                  <div><span>Duration</span><strong>{route.duration_min} min</strong></div>
-                  <div><span>Dead Zones</span><strong style={{ color: route.dead_zone_pct > 20 ? "#ef4444" : "#22c55e" }}>{route.dead_zone_pct}%</strong></div>
-                </div>
+                  <div className="mini-stats">
+                    <div><span>Distance</span><strong>{route.distance_km} km</strong></div>
+                    <div><span>Duration</span><strong>{route.duration_min} min</strong></div>
+                    <div><span>Dead Zones</span><strong style={{ color: route.dead_zone_pct > 20 ? "#ef4444" : "#22c55e" }}>{route.dead_zone_pct}%</strong></div>
+                  </div>
 
-                <div className="breakdown-pills">
-                  {Object.entries(route.breakdown)
-                    .filter(([, v]) => v > 0)
-                    .map(([key, val]) => (
-                      <span key={key} style={{ borderColor: `${SIGNAL_COLORS[key]}55`, color: SIGNAL_COLORS[key] }}>
-                        {key.charAt(0).toUpperCase() + key.slice(1)}: {val}
-                      </span>
-                    ))}
-                </div>
-              </article>
-            );
-          })}
+                  <div className="breakdown-pills">
+                    {Object.entries(route.breakdown)
+                      .filter(([, v]) => v > 0)
+                      .map(([key, val]) => (
+                        <span key={key} style={{ borderColor: `${SIGNAL_COLORS[key]}55`, color: SIGNAL_COLORS[key] }}>
+                          {key.charAt(0).toUpperCase() + key.slice(1)}: {val}
+                        </span>
+                      ))}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </section>
       ) : (
         <section className="empty-state">
