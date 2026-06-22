@@ -96,6 +96,55 @@ def build_route_summary(routes: list[dict]) -> str:
 """)
     return "\n".join(lines)
 
+
+def parse_openrouter_response(data: dict) -> str | None:
+    if not isinstance(data, dict):
+        return None
+
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        first_choice = choices[0]
+        if isinstance(first_choice, dict):
+            message = first_choice.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+
+            text = first_choice.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+
+    for fallback_key in ("output_text", "completion", "result"):
+        value = data.get(fallback_key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return None
+
+
+def build_fallback_insight(routes: list[dict], from_place: str, to_place: str) -> str:
+    if not routes:
+        return (
+            f"Travel from {from_place} to {to_place} with the available route data. "
+            "No AI insight is available at the moment."
+        )
+
+    best_route = max(routes, key=lambda route: route.get("signal_score", 0))
+    route_name = best_route.get("route_name") or f"Route {best_route.get('route_index', 0) + 1}"
+    score = best_route.get("signal_score", 0)
+    avg_signal = best_route.get("avg_signal_dbm", "N/A")
+    dead_zone = best_route.get("dead_zone_pct", 0)
+    dead_zone_note = (
+        "Expect some dead-zone risk on this route." if dead_zone > 20 else "Dead-zone risk appears low."
+    )
+
+    return (
+        f"I recommend {route_name} for travel from {from_place} to {to_place}. "
+        f"It has the highest signal score at {score}% with an average signal strength of {avg_signal} dBm. "
+        f"{dead_zone_note} Estimated dead-zone coverage is around {dead_zone}%.")
+
+
 async def get_signal_score_for_route(coordinates: list) -> dict:
     scores = []
     breakdown = {"excellent": 0, "good": 0, "moderate": 0, "weak": 0, "dead": 0}
@@ -133,6 +182,9 @@ async def compare_routes(
     to_lat: float = Query(...),
     to_lng: float = Query(...)
 ):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured. Copy backend/.env.example to backend/.env and set SUPABASE_URL and SUPABASE_KEY")
+
     try:
         if not ORS_API_KEY:
             raise HTTPException(status_code=500, detail="ORS_API_KEY not set")
@@ -220,11 +272,12 @@ Give a short, clear recommendation (3-4 sentences max) explaining which route to
             resp.raise_for_status()
             data = resp.json()
 
-        content = data.get("choices", [{}])[0].get("message", {}).get("content")
-        if not content:
-            raise HTTPException(status_code=502, detail="OpenRouter returned no insight")
+        content = parse_openrouter_response(data)
+        if content:
+            return {"success": True, "insight": content}
 
-        return {"success": True, "insight": content}
+        fallback_text = build_fallback_insight(payload.routes, payload.from_place, payload.to_place)
+        return {"success": True, "insight": fallback_text}
 
     except httpx.HTTPStatusError as e:
         detail = e.response.text[:300] if e.response is not None else str(e)

@@ -6,6 +6,9 @@ router = APIRouter()
 
 @router.post("/readings")
 async def submit_reading(reading: SignalReading):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured. Copy backend/.env.example to backend/.env and set SUPABASE_URL and SUPABASE_KEY")
+
     try:
         data = {
             "latitude": reading.latitude,
@@ -22,6 +25,9 @@ async def submit_reading(reading: SignalReading):
 
 @router.get("/heatmap")
 async def get_heatmap(limit: int = 10000):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured. Copy backend/.env.example to backend/.env and set SUPABASE_URL and SUPABASE_KEY")
+
     try:
         result = (
             supabase.table("signal_readings")

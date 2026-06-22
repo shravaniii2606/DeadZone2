@@ -29,6 +29,7 @@ const ROUTE_COLORS = ["#22c55e", "#38bdf8", "#f59e0b", "#f472b6", "#a78bfa"];
 
 const MUMBAI_LANDMARKS: Record<string, { lat: number; lng: number }> = {
   "sfit": { lat: 19.2090, lng: 72.8610 },
+  "sfit borivali": { lat: 19.2090, lng: 72.8610 },
   "st francis institute of technology": { lat: 19.2090, lng: 72.8610 },
   "st. francis institute of technology": { lat: 19.2090, lng: 72.8610 },
   "kandivali station": { lat: 19.2043, lng: 72.8489 },
@@ -331,14 +332,17 @@ export default function RoutePage() {
         setAiLoading(true);
         const insight = await getAIInsight(res.routes, fromPlace, toPlace);
         setAiInsight(insight);
-        setAiLoading(false);
       } else {
         setError("No routes found. Try different locations.");
       }
-    } catch {
-      setError("API error. Check that the backend is running.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "API error. Check that the backend is running.";
+      setError(message);
+      setAiInsight("AI insight unavailable.");
+    } finally {
+      setLoading(false);
+      setAiLoading(false);
     }
-    setLoading(false);
   }
 
   function getScoreColor(score: number): string {
@@ -359,6 +363,24 @@ export default function RoutePage() {
 
       <section className="panel">
         <div className="route-form">
+          <div className="route-actions">
+            <button className="secondary-button location-button" onClick={getMyLocation} disabled={gettingGPS}>
+              {gettingGPS ? "Getting GPS..." : "Use My Location"}
+            </button>
+            <button
+              type="button"
+              className="secondary-button demo-button"
+              onClick={() => {
+                setFromPlace("Kandivali Station, Mumbai");
+                setToPlace("SFIT Borivali, Mumbai");
+                setError("");
+                setShowFromSuggestions(false);
+                setShowToSuggestions(false);
+              }}
+            >
+              Autofill demo route
+            </button>
+          </div>
           <label className="field autocomplete-field">
             <span>From</span>
             <input
@@ -387,9 +409,6 @@ export default function RoutePage() {
               </div>
             )}
           </label>
-          <button className="secondary-button location-button" onClick={getMyLocation} disabled={gettingGPS}>
-            {gettingGPS ? "Getting GPS..." : "Use My Location"}
-          </button>
           <label className="field autocomplete-field">
             <span>To</span>
             <input

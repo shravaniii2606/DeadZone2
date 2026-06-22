@@ -21,6 +21,9 @@ async def get_area_report(
     lng: float = Query(..., description="Longitude of center point"),
     radius: int = Query(100, description="Radius in meters")
 ):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured. Copy backend/.env.example to backend/.env and set SUPABASE_URL and SUPABASE_KEY")
+
     try:
         # PostGIS spatial query via Supabase RPC
         result = supabase.rpc("get_readings_in_radius", {

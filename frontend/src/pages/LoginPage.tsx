@@ -12,8 +12,8 @@ export default function LoginPage() {
   const state = location.state as LocationState | null;
   const from = state?.from?.pathname || "/map";
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("user@demo.com");
+  const [password, setPassword] = useState("demo");
   const [error, setError] = useState("");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -42,11 +42,11 @@ export default function LoginPage() {
           <p className="hero-copy">Sign in with your demo account to access the shared signal map and reporting tools.</p>
 
           <form className="auth-form" onSubmit={handleSubmit}>
-            <label className="field">
-              <span>Email</span>
+            <label className="field login-field">
+              <span>Email address</span>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@demo.com" required />
             </label>
-            <label className="field">
+            <label className="field login-field">
               <span>Password</span>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="demo" required />
             </label>

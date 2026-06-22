@@ -379,7 +379,7 @@ export default function MapPage() {
           <p className="eyebrow">Live Signal Heatmap</p>
           <h1>Network Coverage Map</h1>
           <p className="hero-copy">
-            View community signal readings around Mumbai. Start logging to add your current location to the map.
+            Start logging to add your current location to the map.
           </p>
         </div>
         <div className="hero-actions">
@@ -406,7 +406,7 @@ export default function MapPage() {
         <div>
           <p className="panel-kicker">Map Summary</p>
           <h2>{readings.length} points mapped</h2>
-          <p>Auto-refreshes every 15 seconds. Click the map to copy a location into the status bar.</p>
+          <p>Marks the points if moved 10 meters or more. Click the map to copy a location into the status bar.</p>
         </div>
         {sessionCount > 0 && <div className="count-badge">{sessionCount} logged this session</div>}
       </section>

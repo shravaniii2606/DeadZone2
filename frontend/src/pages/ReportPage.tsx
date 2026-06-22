@@ -192,9 +192,26 @@ export default function ReportPage() {
             <p className="panel-kicker">Step 1</p>
             <h2>Pick a location</h2>
           </div>
-          <button className="secondary-button" onClick={fetchMyLocation} disabled={usingGPS}>
-            {usingGPS ? "Getting GPS..." : "Use My Location"}
-          </button>
+          <div className="button-group">
+            <button className="secondary-button" onClick={fetchMyLocation} disabled={usingGPS}>
+              {usingGPS ? "Getting GPS..." : "Use My Location"}
+            </button>
+            <button
+              type="button"
+              className="secondary-button demo-button"
+              onClick={() => {
+                setLocation("Borivali Station, Mumbai");
+                setLat("19.230700");
+                setLng("72.856700");
+                setRadius("200");
+                setError("");
+                setSuggestions([]);
+                setShowSuggestions(false);
+              }}
+            >
+              Autofill
+            </button>
+          </div>
         </div>
 
         <div className="form-grid">
