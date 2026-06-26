@@ -1,5 +1,13 @@
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
+type AreaReportContext = {
+  avgSignal?: number;
+  badReadingRatio?: number;
+  totalReadings?: number;
+  downlink?: number;
+  rtt?: number;
+};
+
 // ── Debounce utility ──────────────────────────────────────────
 export function debounce<T extends (...args: never[]) => void>(fn: T, ms: number): T {
   let timer: ReturnType<typeof setTimeout>;
@@ -48,9 +56,28 @@ export const api = {
     return res.json();
   },
 
-  async getAreaReport(lat: number, lng: number, radius = 500, networkType = "4g") {
+  async getAreaReport(
+    lat: number,
+    lng: number,
+    radius = 500,
+    networkType = "4g",
+    context: AreaReportContext = {}
+  ) {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lng: String(lng),
+      radius: String(radius),
+      network_type: networkType,
+    });
+
+    if (context.avgSignal !== undefined) params.set("avg_signal", String(context.avgSignal));
+    if (context.badReadingRatio !== undefined) params.set("bad_reading_ratio", String(context.badReadingRatio));
+    if (context.totalReadings !== undefined) params.set("total_readings", String(context.totalReadings));
+    if (context.downlink !== undefined) params.set("downlink", String(context.downlink));
+    if (context.rtt !== undefined) params.set("rtt", String(context.rtt));
+
     const res = await fetchWithTimeout(
-      `${BASE_URL}/api/area-report?lat=${lat}&lng=${lng}&radius=${radius}&network_type=${networkType}`,
+      `${BASE_URL}/api/area-report?${params.toString()}`,
       {}, 6000, 1
     );
     return res.json();

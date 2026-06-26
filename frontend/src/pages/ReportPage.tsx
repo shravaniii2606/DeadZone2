@@ -7,10 +7,28 @@ interface BreakdownItem {
   pct: number;
 }
 
+interface ProviderSignalSummary {
+  provider: string;
+  total: number;
+  avg_signal: number;
+  quality: string;
+  breakdown_pct: Record<string, number>;
+}
+
+interface NetworkSignalSummary {
+  network_type: string;
+  total: number;
+  avg_signal: number;
+  quality: string;
+  breakdown_pct: Record<string, number>;
+  providers: ProviderSignalSummary[];
+}
+
 interface ReportResult {
   total: number;
   zone_label: string;
   breakdown: Record<string, number>;
+  network_signal_summary?: NetworkSignalSummary[];
   center: { lat: number; lng: number };
   radius_meters: number;
 }
@@ -33,6 +51,19 @@ const BREAKDOWN_COLORS: Record<string, string> = {
   weak: "#ef4444",
   dead: "#6b7280",
 };
+
+function formatLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatProvider(value: string): string {
+  return value && value.toLowerCase() !== "unknown" ? value : "Unknown provider";
+}
 
 export default function ReportPage() {
   const [location, setLocation] = useState("");
@@ -175,6 +206,7 @@ export default function ReportPage() {
         }))
         .sort((a, b) => b.pct - a.pct)
     : [];
+  const networkSignalSummary = result?.network_signal_summary ?? [];
 
   return (
     <div className="page-stack narrow">
@@ -299,6 +331,54 @@ export default function ReportPage() {
               ))}
             </div>
           </section>
+
+          {networkSignalSummary.length > 0 && (
+            <section className="panel">
+              <p className="panel-kicker">Network Quality</p>
+              <h2>Signal by network and provider</h2>
+              <div className="network-quality-list">
+                {networkSignalSummary.map((network) => (
+                  <article className="network-quality-card" key={network.network_type}>
+                    <div className="network-quality-head">
+                      <div>
+                        <span>{network.network_type}</span>
+                        <strong style={{ color: getZoneColor(network.quality) }}>
+                          {formatLabel(network.quality)}
+                        </strong>
+                      </div>
+                      <div className="network-quality-meta">
+                        <span>{network.total} {network.total === 1 ? "point" : "points"}</span>
+                        <span>{network.avg_signal.toFixed(1)} dBm avg</span>
+                      </div>
+                    </div>
+
+                    <div className="provider-quality-list">
+                      {network.providers.map((provider) => (
+                        <div className="provider-quality-row" key={`${network.network_type}-${provider.provider}`}>
+                          <div>
+                            <strong>{formatProvider(provider.provider)}</strong>
+                            <span>
+                              {provider.total} {provider.total === 1 ? "point" : "points"} - {provider.avg_signal.toFixed(1)} dBm avg
+                            </span>
+                          </div>
+                          <span
+                            className="quality-pill"
+                            style={{
+                              borderColor: `${getZoneColor(provider.quality)}66`,
+                              color: getZoneColor(provider.quality),
+                              background: `${getZoneColor(provider.quality)}14`,
+                            }}
+                          >
+                            {formatLabel(provider.quality)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="details-strip">
             <div><span>Center</span><strong>{result.center.lat.toFixed(6)}, {result.center.lng.toFixed(6)}</strong></div>

@@ -224,6 +224,14 @@ function MapFocusHandler({ focus }: { focus: [number, number] | null }) {
   return null;
 }
 type MapColorMode = "signal" | "network";
+type NetworkProviderQuality = {
+  networkType: string;
+  provider: string;
+  total: number;
+  avgSignal: number;
+  quality: string;
+};
+
 export default function MapPage() {
   const [readings, setReadings] = useState<Reading[]>([]);
   const [logging, setLogging] = useState(false);
@@ -244,6 +252,7 @@ const [areaReport, setAreaReport] = useState<{
   deadZones: number;
   total: number;
   networkCounts: Record<string, number>;
+  networkProviderQuality: NetworkProviderQuality[];
   mlPrediction: {
     is_dead_zone: boolean;
     probability: number;
@@ -300,12 +309,16 @@ const [isLoadingReport, setIsLoadingReport] = useState(false);
 
   async function logReading(lat: number, lng: number, gpsAccuracy = 10) {
     const lastLocation = lastLoggedLocationRef.current;
-    if (lastLocation) {
-      const moved = getDistanceMeters(lastLocation.lat, lastLocation.lng, lat, lng);
-      if (moved < 10) {
-        setStatus(`Awaiting movement (${Math.round(moved)}m)`);
-        return;
-      }
+    if (!lastLocation) {
+      lastLoggedLocationRef.current = { lat, lng };
+      setStatus("GPS locked - move 10m to log");
+      return;
+    }
+
+    const moved = getDistanceMeters(lastLocation.lat, lastLocation.lng, lat, lng);
+    if (moved < 10) {
+      setStatus(`Awaiting movement (${Math.round(moved)}m)`);
+      return;
     }
 
     const networkType = resolveNetworkGeneration(networkGeneration);
@@ -327,6 +340,7 @@ const [isLoadingReport, setIsLoadingReport] = useState(false);
     });
 
     if (localReading) {
+      lastLoggedLocationRef.current = { lat: localReading.latitude, lng: localReading.longitude };
       setReadings((current) => mergeReadings([localReading], current));
       setFocusPoint([localReading.latitude, localReading.longitude]);
     }
@@ -386,6 +400,7 @@ const [isLoadingReport, setIsLoadingReport] = useState(false);
     }
 
     setLogging(true);
+    lastLoggedLocationRef.current = null;
     setStatus("Getting GPS fix");
 
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -419,19 +434,48 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
   const avgSignal = nearby.reduce((s, r) => s + r.signal_strength, 0) / nearby.length;
   const networkCounts: Record<string, number> = {};
   const operatorCounts: Record<string, number> = {};
+  const qualityGroups = new Map<string, {
+    networkType: string;
+    provider: string;
+    total: number;
+    signalSum: number;
+  }>();
   nearby.forEach((r) => {
     const nt = r.network_type?.toLowerCase() ?? "unknown";
+    const provider = r.operator || "unknown";
     networkCounts[nt] = (networkCounts[nt] ?? 0) + 1;
-    operatorCounts[r.operator] = (operatorCounts[r.operator] ?? 0) + 1;
+    operatorCounts[provider] = (operatorCounts[provider] ?? 0) + 1;
+    const groupKey = `${nt}-${provider}`;
+    const group = qualityGroups.get(groupKey) ?? {
+      networkType: nt,
+      provider,
+      total: 0,
+      signalSum: 0,
+    };
+    group.total += 1;
+    group.signalSum += r.signal_strength;
+    qualityGroups.set(groupKey, group);
   });
   const dominantNetwork = Object.entries(networkCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "unknown";
   const dominantOperator = Object.entries(operatorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "unknown";
+  const networkProviderQuality = Array.from(qualityGroups.values())
+    .map((group) => {
+      const groupAvgSignal = group.signalSum / group.total;
+      return {
+        networkType: group.networkType,
+        provider: group.provider,
+        total: group.total,
+        avgSignal: groupAvgSignal,
+        quality: getSignalLabel(groupAvgSignal),
+      };
+    })
+    .sort((a, b) => b.total - a.total);
 
   // Show optimistic UI immediately with local data
   setAreaReport({
     lat, lng, avgSignal, dominantNetwork, dominantOperator,
     deadZones: nearby.filter((r) => r.signal_strength < -100).length,
-    total: nearby.length, networkCounts, mlPrediction: null,
+    total: nearby.length, networkCounts, networkProviderQuality, mlPrediction: null,
   });
   setStatus(`Area report: ${nearby.length} readings`);
 

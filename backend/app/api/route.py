@@ -80,6 +80,47 @@ def get_route_name(route: dict) -> str:
     except:
         return "Unnamed Route"
 
+def normalize_route_name(name: str | None) -> str:
+    route_name = (name or "Unnamed Route").lower().strip()
+    if route_name.startswith("via "):
+        route_name = route_name[4:]
+    return " ".join(route_name.split())
+
+def route_sort_score(route: dict) -> tuple:
+    return (
+        route.get("signal_score", 0),
+        -route.get("dead_zone_pct", 100),
+        -route.get("duration_min", 9999),
+        -route.get("distance_km", 9999),
+    )
+
+def dedupe_routes(routes: list[dict]) -> list[dict]:
+    unique_routes = []
+    route_indexes_by_key = {}
+
+    for route in routes:
+        route_name = route.get("route_name")
+        name_key = normalize_route_name(route_name)
+        if name_key == "unnamed route":
+            key = f"{name_key}:{round(route.get('distance_km', 0), 1)}:{round(route.get('duration_min', 0), 1)}"
+        else:
+            key = name_key
+
+        existing_index = route_indexes_by_key.get(key)
+        if existing_index is None:
+            route_indexes_by_key[key] = len(unique_routes)
+            unique_routes.append(route)
+            continue
+
+        if route_sort_score(route) > route_sort_score(unique_routes[existing_index]):
+            unique_routes[existing_index] = route
+
+    for index, route in enumerate(unique_routes):
+        route["route_index"] = index
+        route["recommended"] = False
+
+    return unique_routes
+
 def build_route_summary(routes: list[dict]) -> str:
     lines = []
     for index, route in enumerate(routes):
@@ -231,6 +272,7 @@ async def compare_routes(
                 "recommended": False
             })
 
+        result = dedupe_routes(result)
         best = max(result, key=lambda x: x["signal_score"])
         best["recommended"] = True
 
@@ -244,10 +286,8 @@ async def compare_routes(
 
 @router.post("/route/insight")
 async def route_insight(payload: RouteInsightRequest):
-    if not OPENROUTER_API_KEY:
-        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY not set")
-
     route_summary = build_route_summary(payload.routes)
+    fallback_text = build_fallback_insight(payload.routes, payload.from_place, payload.to_place)
     prompt = f"""You are a telecom signal analyst. A user wants to travel from "{payload.from_place}" to "{payload.to_place}" in Mumbai, India.
 Here is the signal quality data for available routes:
 
@@ -255,9 +295,18 @@ Here is the signal quality data for available routes:
 
 Give a short, clear recommendation (3-4 sentences max) explaining which route to take, what connectivity to expect, and any dead-zone warning. Be direct and practical."""
 
+    if not OPENROUTER_API_KEY:
+        return {
+            "success": True,
+            "insight": fallback_text,
+            "source": "local_fallback",
+            "warning": "OPENROUTER_API_KEY not set"
+        }
+
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:5173",
         "X-Title": "DeadZone Route Planner",
     }
     body = {
@@ -274,13 +323,27 @@ Give a short, clear recommendation (3-4 sentences max) explaining which route to
 
         content = parse_openrouter_response(data)
         if content:
-            return {"success": True, "insight": content}
+            return {"success": True, "insight": content, "source": "openrouter"}
 
-        fallback_text = build_fallback_insight(payload.routes, payload.from_place, payload.to_place)
-        return {"success": True, "insight": fallback_text}
+        return {
+            "success": True,
+            "insight": fallback_text,
+            "source": "local_fallback",
+            "warning": "OpenRouter response did not include text"
+        }
 
     except httpx.HTTPStatusError as e:
         detail = e.response.text[:300] if e.response is not None else str(e)
-        raise HTTPException(status_code=502, detail=f"OpenRouter API error: {detail}")
+        return {
+            "success": True,
+            "insight": fallback_text,
+            "source": "local_fallback",
+            "warning": f"OpenRouter API error: {detail}"
+        }
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"OpenRouter API error: {str(e)}")
+        return {
+            "success": True,
+            "insight": fallback_text,
+            "source": "local_fallback",
+            "warning": f"OpenRouter API error: {str(e)}"
+        }

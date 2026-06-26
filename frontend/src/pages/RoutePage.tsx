@@ -93,12 +93,98 @@ async function searchLocations(place: string): Promise<Array<{ display_name: str
     return [];
   }
 }
+
+function buildLocalRouteInsight(routes: Route[], from: string, to: string): string {
+  if (routes.length === 0) {
+    return `No route recommendation is available yet for travel from ${from} to ${to}.`;
+  }
+
+  const bestRoute = routes.reduce((best, route) =>
+    route.signal_score > best.signal_score ? route : best
+  );
+  const routeName = bestRoute.route_name || ROUTE_NAMES[bestRoute.route_index] || `Route ${bestRoute.route_index + 1}`;
+  const deadZoneNote = bestRoute.dead_zone_pct > 20
+    ? "Expect some dead-zone risk on this route."
+    : "Dead-zone risk appears low.";
+
+  return (
+    `I recommend ${routeName} for travel from ${from} to ${to}. ` +
+    `It has the strongest connectivity score at ${bestRoute.signal_score}% with an average signal of ${bestRoute.avg_signal_dbm} dBm. ` +
+    `${deadZoneNote} Estimated dead-zone coverage is ${bestRoute.dead_zone_pct}%.`
+  );
+}
+
+function normalizeRouteName(name?: string): string {
+  const routeName = (name || "Unnamed Route").toLowerCase().trim();
+  return routeName.startsWith("via ")
+    ? routeName.slice(4).replace(/\s+/g, " ")
+    : routeName.replace(/\s+/g, " ");
+}
+
+function routeSortScore(route: Route): [number, number, number, number] {
+  return [
+    route.signal_score,
+    -route.dead_zone_pct,
+    -route.duration_min,
+    -route.distance_km,
+  ];
+}
+
+function isBetterRoute(candidate: Route, current: Route): boolean {
+  const candidateScore = routeSortScore(candidate);
+  const currentScore = routeSortScore(current);
+
+  for (let index = 0; index < candidateScore.length; index += 1) {
+    if (candidateScore[index] !== currentScore[index]) {
+      return candidateScore[index] > currentScore[index];
+    }
+  }
+
+  return false;
+}
+
+function dedupeRoutes(routes: Route[]): Route[] {
+  const uniqueRoutes: Route[] = [];
+  const indexesByKey = new Map<string, number>();
+
+  routes.forEach((route) => {
+    const nameKey = normalizeRouteName(route.route_name);
+    const key = nameKey === "unnamed route"
+      ? `${nameKey}:${route.distance_km.toFixed(1)}:${route.duration_min.toFixed(1)}`
+      : nameKey;
+    const existingIndex = indexesByKey.get(key);
+
+    if (existingIndex === undefined) {
+      indexesByKey.set(key, uniqueRoutes.length);
+      uniqueRoutes.push(route);
+      return;
+    }
+
+    if (isBetterRoute(route, uniqueRoutes[existingIndex])) {
+      uniqueRoutes[existingIndex] = route;
+    }
+  });
+
+  if (uniqueRoutes.length === 0) {
+    return [];
+  }
+
+  const bestScore = Math.max(...uniqueRoutes.map((route) => route.signal_score));
+  let recommendedUsed = false;
+
+  return uniqueRoutes.map((route, index) => {
+    const recommended = !recommendedUsed && route.signal_score === bestScore;
+    if (recommended) recommendedUsed = true;
+    return { ...route, route_index: index, recommended };
+  });
+}
+
 async function getAIInsight(routes: Route[], from: string, to: string): Promise<string> {
   try {
     const data = await api.getRouteInsight(routes, from, to);
-    return data.insight ?? data.detail ?? "Could not generate insight.";
+    return data.insight ?? buildLocalRouteInsight(routes, from, to);
   } catch (err) {
-    return err instanceof Error ? err.message : "AI insight unavailable.";
+    return buildLocalRouteInsight(routes, from, to);
   }
 }
 
@@ -328,9 +414,10 @@ export default function RoutePage() {
     try {
       const res = await api.getRoute(from.lat, from.lng, to.lat, to.lng);
       if (res.success) {
-        setRoutes(res.routes);
+        const uniqueRoutes = dedupeRoutes(res.routes);
+        setRoutes(uniqueRoutes);
         setAiLoading(true);
-        const insight = await getAIInsight(res.routes, fromPlace, toPlace);
+        const insight = await getAIInsight(uniqueRoutes, fromPlace, toPlace);
         setAiInsight(insight);
       } else {
         setError("No routes found. Try different locations.");
