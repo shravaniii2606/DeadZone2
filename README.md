@@ -126,3 +126,15 @@ total_trained_on counter increments
 ## 💡 Vision
 
 Network connectivity should be predictable, not uncertain. DeadZone turns every smartphone into a signal sensor — building the most accurate, real-time coverage map of India, one reading at a time.
+
+<img width="2558" height="1600" alt="image" src="https://github.com/user-attachments/assets/b4b044d4-823e-452f-bc6c-064544bfd94f" />
+<img width="2560" height="1312" alt="image" src="https://github.com/user-attachments/assets/bcdf1fd4-bc7d-4872-8466-ea8ac2e12fc2" />
+<img width="2560" height="1316" alt="image" src="https://github.com/user-attachments/assets/206c17f7-fe6a-4f6c-9731-bcc3a538137f" />
+<img width="1992" height="826" alt="image" src="https://github.com/user-attachments/assets/26e3c6b4-2cfc-4e86-8b57-e2c74246e01b" />
+<img width="2196" height="948" alt="image" src="https://github.com/user-attachments/assets/2e13b461-d0e8-443b-87a6-4242c2289103" />
+<img width="2516" height="1332" alt="image" src="https://github.com/user-attachments/assets/64f1c854-9e13-4ef0-a9dc-e8e065db92ed" />
+<img width="2550" height="1288" alt="image" src="https://github.com/user-attachments/assets/25dd1c0b-2491-40bc-91fc-8c9868420262" />
+<img width="2556" height="1350" alt="image" src="https://github.com/user-attachments/assets/49147907-436c-4f5e-a418-c53795843dbb" />
+<img width="2560" height="1270" alt="image" src="https://github.com/user-attachments/assets/d7213166-7fa4-449f-9786-ab3f9aa0fbaf" />
+<img width="2560" height="1308" alt="image" src="https://github.com/user-attachments/assets/faa629a6-535c-4432-80a8-a4935a2af820" />
+<img width="2548" height="1344" alt="image" src="https://github.com/user-attachments/assets/64ca2e20-dd58-49d7-9d98-9dda063916db" />
