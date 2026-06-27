@@ -1,269 +1,304 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 
-type NavigatorWithConnection = Navigator & {
-  connection?: {
-    effectiveType?: string;
-    downlink?: number;
-    rtt?: number;
-  };
+interface Reading {
+  latitude: number;
+  longitude: number;
+  signal_strength: number;
+  network_type: string;
+  operator: string;
+}
+
+interface OperatorStat {
+  operator: string;
+  avgSignal: number;
+  total: number;
+  deadZones: number;
+  deadZonePct: number;
+  dominant_network: string;
+  color: string;
+}
+
+interface DeadZoneHotspot {
+  lat: number;
+  lng: number;
+  count: number;
+  avgSignal: number;
+  area: string;
+}
+
+interface NetworkStat {
+  type: string;
+  count: number;
+  pct: number;
+  color: string;
+}
+
+const OPERATOR_COLORS: Record<string, string> = {
+  Jio: "#0ea5e9",
+  Airtel: "#f59e0b",
+  Vi: "#a855f7",
+  BSNL: "#22c55e",
+  unknown: "#6b7280",
 };
 
-type NetworkGeneration = "AUTO" | "3G" | "4G" | "5G";
-
-function getSignalLabel(dbm: number) {
-  if (dbm >= -70) return { label: "Excellent", color: "#22c55e", desc: "High-speed connection" };
-  if (dbm >= -85) return { label: "Good", color: "#84cc16", desc: "Stable everyday coverage" };
-  if (dbm >= -100) return { label: "Moderate", color: "#f59e0b", desc: "Usable with some slowdowns" };
-  if (dbm >= -110) return { label: "Weak", color: "#ef4444", desc: "Poor signal quality" };
-  return { label: "Dead Zone", color: "#6b7280", desc: "No usable signal" };
-}
-
-function resolveNetworkGeneration(override: NetworkGeneration): string {
-  if (override !== "AUTO") return override;
-
-  const conn = (navigator as NavigatorWithConnection).connection;
-  if (conn?.effectiveType) return conn.effectiveType.toUpperCase();
-  return "UNKNOWN";
-}
-
-function estimateSignalStrength(networkType: string, downlink: number, latency: number): number {
-  const baseByNetwork: Record<string, number> = {
-    "5G": -65,
-    "4G": -75,
-    "3G": -90,
-    "2G": -105,
-    "SLOW-2G": -112,
-  };
-  const base = baseByNetwork[networkType] ?? -95;
-  const speedBoost = Math.min(12, Math.round(downlink * 1.5));
-  const latencyPenalty = latency > 0 ? Math.min(18, Math.round(latency / 25)) : 5;
-  return Math.max(-120, Math.min(-55, base + speedBoost - latencyPenalty));
-}
-
-function getDownlink(): number {
-  const conn = (navigator as NavigatorWithConnection).connection;
-  return conn?.downlink ?? 0;
-}
-
-function getRtt(): number {
-  const conn = (navigator as NavigatorWithConnection).connection;
-  return conn?.rtt ?? 0;
-}
-
-const GPS_OPTIONS: PositionOptions = {
-  enableHighAccuracy: true,
-  maximumAge: 30000,
-  timeout: 20000,
+const NETWORK_COLORS: Record<string, string> = {
+  "5g": "#a855f7",
+  "4g": "#3b82f6",
+  "3g": "#f59e0b",
+  "2g": "#ef4444",
+  "slow-2g": "#dc2626",
+  unknown: "#6b7280",
 };
 
-function getGpsErrorMessage(error: GeolocationPositionError): string {
-  if (!window.isSecureContext) {
-    return "GPS needs HTTPS or localhost";
-  }
+function getSignalColor(s: number) {
+  if (s >= -70) return "#22c55e";
+  if (s >= -85) return "#84cc16";
+  if (s >= -100) return "#f59e0b";
+  if (s >= -110) return "#ef4444";
+  return "#6b7280";
+}
 
-  if (error.code === error.PERMISSION_DENIED) {
-    return "Location permission denied";
-  }
-
-  if (error.code === error.POSITION_UNAVAILABLE) {
-    return "GPS position unavailable";
-  }
-
-  if (error.code === error.TIMEOUT) {
-    return "GPS timed out, try again";
-  }
-
-  return "GPS error";
+function getAreaName(lat: number, lng: number): string {
+  if (lat > 19.20) return "Thane / Mulund";
+  if (lat > 19.15) return "Ghatkopar / Vikhroli";
+  if (lat > 19.10) return "Kurla / Sion";
+  if (lat > 19.05) return "Dharavi / Matunga";
+  if (lat > 19.00) return "Dadar / Parel";
+  if (lat > 18.97) return "Worli / Lower Parel";
+  return "Colaba / South Mumbai";
 }
 
 export default function StatsPage() {
-  const [logging, setLogging] = useState(false);
-  const [signal, setSignal] = useState<number>(-80);
-  const [sessionCount, setSessionCount] = useState(0);
-  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
-  const [downlink, setDownlink] = useState<number>(0);
-  const [rtt, setRtt] = useState<number>(0);
-  const [networkGeneration, setNetworkGeneration] = useState<NetworkGeneration>("AUTO");
-  const [networkType, setNetworkType] = useState("UNKNOWN");
-  const [history, setHistory] = useState<number[]>([]);
-  const [status, setStatus] = useState("Idle");
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [readings, setReadings] = useState<Reading[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [operatorStats, setOperatorStats] = useState<OperatorStat[]>([]);
+  const [hotspots, setHotspots] = useState<DeadZoneHotspot[]>([]);
+  const [networkStats, setNetworkStats] = useState<NetworkStat[]>([]);
+  const [totalReadings, setTotalReadings] = useState(0);
+  const [totalDeadZones, setTotalDeadZones] = useState(0);
 
   useEffect(() => {
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    fetchData();
   }, []);
 
-  function updateStats() {
-    const d = getDownlink();
-    const r = getRtt();
-    const n = resolveNetworkGeneration(networkGeneration);
-    const s = estimateSignalStrength(n, d, r);
-    setSignal(s);
-    setDownlink(d);
-    setRtt(r);
-    setNetworkType(n);
-    setHistory((prev) => [...prev.slice(-19), s]);
-    return { s, d, r, n };
-  }
-
-  async function logToBackend(
-    lat: number,
-    lng: number,
-    gpsAccuracyValue: number,
-    snapshot = { s: signal, d: downlink, r: rtt, n: networkType }
-  ) {
+  async function fetchData() {
     try {
-      await api.submitReading({
-        latitude: lat,
-        longitude: lng,
-        signal_strength: snapshot.s,
-        network_type: snapshot.n,
-        operator: "unknown",
-        device_type: /Android/i.test(navigator.userAgent) ? "android" : "other",
-        gps_accuracy: gpsAccuracyValue,
-        download_speed: snapshot.d,
-        latency: snapshot.r,
-      });
-      setSessionCount((c) => c + 1);
-      setStatus("Synced");
-    } catch {
-      setStatus("Sync failed");
+      const res = await api.getHeatmap();
+      if (res.success && Array.isArray(res.data)) {
+        const data: Reading[] = res.data;
+        setReadings(data);
+        processData(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch data", e);
+    } finally {
+      setLoading(false);
     }
   }
 
-  function collectOnce() {
-    const snapshot = updateStats();
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setGpsAccuracy(pos.coords.accuracy);
-        logToBackend(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, snapshot);
-      },
-      (error) => setStatus(getGpsErrorMessage(error)),
-      GPS_OPTIONS
-    );
+  function processData(data: Reading[]) {
+    setTotalReadings(data.length);
+    const deadCount = data.filter(r => r.signal_strength < -100).length;
+    setTotalDeadZones(deadCount);
+
+    // Operator stats
+    const opMap: Record<string, { signals: number[]; networks: string[] }> = {};
+    data.forEach(r => {
+      const op = r.operator || "unknown";
+      if (!opMap[op]) opMap[op] = { signals: [], networks: [] };
+      opMap[op].signals.push(r.signal_strength);
+      opMap[op].networks.push(r.network_type?.toLowerCase() || "unknown");
+    });
+
+    const opStats: OperatorStat[] = Object.entries(opMap)
+      .map(([op, { signals, networks }]) => {
+        const avg = signals.reduce((a, b) => a + b, 0) / signals.length;
+        const dead = signals.filter(s => s < -100).length;
+        const netCount: Record<string, number> = {};
+        networks.forEach(n => { netCount[n] = (netCount[n] || 0) + 1; });
+        const dominant = Object.entries(netCount).sort((a, b) => b[1] - a[1])[0]?.[0] || "unknown";
+        return {
+          operator: op,
+          avgSignal: Math.round(avg),
+          total: signals.length,
+          deadZones: dead,
+          deadZonePct: Math.round((dead / signals.length) * 100),
+          dominant_network: dominant.toUpperCase(),
+          color: OPERATOR_COLORS[op] || "#6b7280",
+        };
+      })
+      .sort((a, b) => b.avgSignal - a.avgSignal);
+
+    setOperatorStats(opStats);
+
+    // Dead zone hotspots — grid-based clustering
+    const grid: Record<string, { lats: number[]; lngs: number[]; signals: number[] }> = {};
+    data.filter(r => r.signal_strength < -100).forEach(r => {
+      const key = `${(r.latitude * 20).toFixed(0)},${(r.longitude * 20).toFixed(0)}`;
+      if (!grid[key]) grid[key] = { lats: [], lngs: [], signals: [] };
+      grid[key].lats.push(r.latitude);
+      grid[key].lngs.push(r.longitude);
+      grid[key].signals.push(r.signal_strength);
+    });
+
+    const spots: DeadZoneHotspot[] = Object.values(grid)
+      .filter(g => g.lats.length >= 2)
+      .map(g => {
+        const lat = g.lats.reduce((a, b) => a + b, 0) / g.lats.length;
+        const lng = g.lngs.reduce((a, b) => a + b, 0) / g.lngs.length;
+        return {
+          lat, lng,
+          count: g.lats.length,
+          avgSignal: Math.round(g.signals.reduce((a, b) => a + b, 0) / g.signals.length),
+          area: getAreaName(lat, lng),
+        };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+
+    setHotspots(spots);
+
+    // Network distribution
+    const netMap: Record<string, number> = {};
+    data.forEach(r => {
+      const nt = r.network_type?.toLowerCase() || "unknown";
+      netMap[nt] = (netMap[nt] || 0) + 1;
+    });
+
+    const netStats: NetworkStat[] = Object.entries(netMap)
+      .map(([type, count]) => ({
+        type,
+        count,
+        pct: Math.round((count / data.length) * 100),
+        color: NETWORK_COLORS[type] || "#6b7280",
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    setNetworkStats(netStats);
   }
 
-  function startLogging() {
-    if (!navigator.geolocation) {
-      setStatus("GPS not supported");
-      return;
-    }
-
-    if (!window.isSecureContext) {
-      setStatus("GPS needs HTTPS or localhost");
-      return;
-    }
-
-    setLogging(true);
-    setStatus("Getting GPS fix");
-
-    const snapshot = updateStats();
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setGpsAccuracy(pos.coords.accuracy);
-        logToBackend(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, snapshot);
-        setStatus("Logging every 5 seconds");
-        intervalRef.current = setInterval(collectOnce, 5000);
-      },
-      (error) => {
-        setStatus(getGpsErrorMessage(error));
-        setLogging(false);
-      },
-      GPS_OPTIONS
-    );
-  }
-
-  function stopLogging() {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    setLogging(false);
-    setStatus("Session ended");
-  }
-
-  const signalInfo = getSignalLabel(signal);
-  const signalPct = Math.max(0, Math.min(100, Math.round(((signal + 120) / 70) * 100)));
-  const statCards = [
-    { label: "Session Points", value: `${sessionCount}`, sub: "Readings added", color: "#22c55e" },
-    { label: "GPS Accuracy", value: gpsAccuracy ? `${gpsAccuracy.toFixed(1)} m` : "Waiting", sub: gpsAccuracy && gpsAccuracy < 10 ? "Precise fix" : "Start logging to update", color: "#38bdf8" },
-    { label: "Downlink", value: `${downlink} Mbps`, sub: `Estimated ${networkType} speed`, color: "#a78bfa" },
-    { label: "Latency", value: `${rtt} ms`, sub: rtt && rtt < 50 ? "Low latency" : "Measured round trip", color: "#f59e0b" },
-  ];
+  if (loading) return (
+    <div className="page-stack" style={{ alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+      <p style={{ opacity: 0.5 }}>Loading telecom intelligence...</p>
+    </div>
+  );
 
   return (
-    <div className="page-stack narrow">
+    <div className="page-stack">
       <section className="page-hero">
         <div>
-          <p className="eyebrow">Real-Time Signal Stats</p>
-          <h1>Signal Monitor</h1>
-          <p className="hero-copy">Start a logging session to capture live signal, GPS accuracy, speed, and latency readings.</p>
-        </div>
-        <div className="hero-actions">
-          <label className="network-picker">
-            <span>Network</span>
-            <select value={networkGeneration} onChange={(e) => setNetworkGeneration(e.target.value as NetworkGeneration)} disabled={logging}>
-              <option value="AUTO">Auto</option>
-              <option value="3G">3G</option>
-              <option value="4G">4G</option>
-              <option value="5G">5G</option>
-            </select>
-          </label>
-          <div className={`status-pill ${logging ? "active" : ""}`}>
-            <span aria-hidden="true" />
-            {status}
-          </div>
-          <button className={`primary-button ${logging ? "danger" : ""}`} onClick={logging ? stopLogging : startLogging}>
-            {logging ? "Stop Session" : "Start Session"}
-          </button>
+          <p className="eyebrow">Telecom Intelligence Dashboard</p>
+          <h1>Network Analytics</h1>
+          <p className="hero-copy">Crowdsourced signal intelligence across Mumbai — operator performance, dead zone hotspots, and coverage gaps.</p>
         </div>
       </section>
 
-      <section className="signal-card">
-        <div className="signal-ring" style={{ borderColor: signalInfo.color, boxShadow: `0 0 42px ${signalInfo.color}30` }}>
-          <strong style={{ color: signalInfo.color }}>{signalInfo.label}</strong>
-          <span>{signalInfo.desc}</span>
-        </div>
-        <div className="signal-reading">
-          <p style={{ color: signalInfo.color }}>{signal} <span>dBm</span></p>
-          <div className="meter-label">
-            <span>Signal Strength</span>
-            <strong style={{ color: signalInfo.color }}>{signalPct}%</strong>
-          </div>
-          <div className="meter-track">
-            <div style={{ width: `${signalPct}%`, background: signalInfo.color }} />
-          </div>
-        </div>
-      </section>
-
+      {/* Summary Stats */}
       <section className="stats-grid">
-        {statCards.map((stat) => (
-          <div className="stat-card" key={stat.label} style={{ borderTopColor: stat.color }}>
-            <span>{stat.label}</span>
-            <strong style={{ color: stat.color }}>{stat.value}</strong>
-            <p>{stat.sub}</p>
+        {[
+          { label: "Total Readings", value: totalReadings.toLocaleString(), color: "#22c55e", sub: "Crowdsourced data points" },
+          { label: "Dead Zones Found", value: totalDeadZones.toLocaleString(), color: "#ef4444", sub: `${Math.round((totalDeadZones/totalReadings)*100)}% of coverage area` },
+          { label: "Operators Tracked", value: operatorStats.length.toString(), color: "#a855f7", sub: "Jio, Airtel, Vi, BSNL" },
+          { label: "Areas Covered", value: "Mumbai MMR", color: "#38bdf8", sub: "18.89°N – 19.27°N" },
+        ].map(s => (
+          <div className="stat-card" key={s.label} style={{ borderTopColor: s.color }}>
+            <span>{s.label}</span>
+            <strong style={{ color: s.color }}>{s.value}</strong>
+            <p>{s.sub}</p>
           </div>
         ))}
       </section>
 
-      {history.length > 1 ? (
-        <section className="panel">
-          <p className="panel-kicker">Signal History</p>
-          <h2>Last {history.length} readings</h2>
-          <div className="history-bars" aria-label="Recent signal readings">
-            {history.map((val, i) => {
-              const pct = Math.max(0, Math.min(100, ((val + 120) / 70) * 100));
-              const col = getSignalLabel(val).color;
-              return <div key={`${val}-${i}`} style={{ height: `${pct}%`, background: col }} title={`${val} dBm`} />;
-            })}
-          </div>
-        </section>
-      ) : (
-        <section className="empty-state">
-          <strong>No session data yet</strong>
-          <p>Start a session to see your first live readings and chart history.</p>
-        </section>
-      )}
+      {/* Operator Comparison */}
+      <section className="panel">
+        <p className="panel-kicker">Operator Performance</p>
+        <h2>Signal Quality by Provider</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "1rem" }}>
+          {operatorStats.map(op => (
+            <div key={op.operator} style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+              <div style={{ width: "80px", fontWeight: 700, color: op.color }}>{op.operator}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem", fontSize: "0.8rem" }}>
+                  <span>Avg Signal: <strong style={{ color: getSignalColor(op.avgSignal) }}>{op.avgSignal}</strong></span>
+                  <span>Dead Zones: <strong style={{ color: "#ef4444" }}>{op.deadZonePct}%</strong></span>
+                  <span>Network: <strong>{op.dominant_network}</strong></span>
+                  <span style={{ opacity: 0.5 }}>{op.total} readings</span>
+                </div>
+                <div style={{ height: "6px", background: "#1a1a1a", borderRadius: "3px", overflow: "hidden" }}>
+                  <div style={{ // Replace the bar width calculation:
+width: `${Math.max(0, Math.min(100, ((op.avgSignal + 120) / 65) * 100))}%`, height: "100%", background: op.color, borderRadius: "3px", transition: "width 0.5s" }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Dead Zone Hotspots */}
+      <section className="panel">
+        <p className="panel-kicker">Dead Zone Intelligence</p>
+        <h2>Top Hotspots Requiring Attention</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "0.75rem", marginTop: "1rem" }}>
+          {hotspots.length === 0 ? (
+            <p style={{ opacity: 0.5 }}>No significant dead zone clusters found</p>
+          ) : hotspots.map((spot, i) => (
+            <div key={i} style={{ background: "#0d1a0d", border: "1px solid #ef444433", borderRadius: "8px", padding: "0.75rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <strong style={{ color: "#ef4444" }}>#{i + 1} {spot.area}</strong>
+                <span style={{ fontSize: "0.75rem", background: "#ef444422", color: "#ef4444", padding: "0.1rem 0.4rem", borderRadius: "4px" }}>
+                  {spot.count} reports
+                </span>
+              </div>
+              <p style={{ fontSize: "0.78rem", opacity: 0.6, margin: "0.25rem 0" }}>
+                {spot.lat.toFixed(4)}°N, {spot.lng.toFixed(4)}°E
+              </p>
+              <p style={{ fontSize: "0.8rem", margin: 0 }}>
+                Avg Signal: <strong style={{ color: getSignalColor(spot.avgSignal) }}>{spot.avgSignal}</strong>
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Network Distribution */}
+      <section className="panel">
+        <p className="panel-kicker">Network Coverage</p>
+        <h2>Distribution by Generation</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginTop: "1rem" }}>
+          {networkStats.map(n => (
+            <div key={n.type} style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+              <div style={{ width: "70px", fontWeight: 700, color: n.color }}>{n.type.toUpperCase()}</div>
+              <div style={{ flex: 1, height: "8px", background: "#1a1a1a", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ width: `${n.pct}%`, height: "100%", background: n.color, borderRadius: "4px", transition: "width 0.5s" }} />
+              </div>
+              <div style={{ width: "60px", textAlign: "right", fontSize: "0.8rem" }}>
+                <strong>{n.pct}%</strong> <span style={{ opacity: 0.5 }}>({n.count})</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Business Value */}
+      <section className="panel" style={{ borderLeft: "4px solid #22c55e" }}>
+        <p className="panel-kicker">Business Intelligence</p>
+        <h2>Why Telecom Companies Need This</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "1rem", marginTop: "1rem" }}>
+          {[
+            { icon: "📡", title: "Tower Placement", desc: "Identify exact coordinates where new towers will eliminate the most dead zones" },
+            { icon: "📊", title: "Competitor Analysis", desc: "Compare signal quality across operators to identify market gaps" },
+            { icon: "🏛️", title: "TRAI Compliance", desc: "Ground truth data for regulatory reporting and coverage commitments" },
+            { icon: "💰", title: "ROI Optimization", desc: "Prioritize infrastructure spend based on crowdsourced impact data" },
+          ].map(b => (
+            <div key={b.title} style={{ background: "#0d1a0d", borderRadius: "8px", padding: "0.75rem" }}>
+              <p style={{ fontSize: "1.5rem", margin: "0 0 0.5rem" }}>{b.icon}</p>
+              <strong style={{ color: "#22c55e" }}>{b.title}</strong>
+              <p style={{ fontSize: "0.8rem", opacity: 0.7, margin: "0.25rem 0 0" }}>{b.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
