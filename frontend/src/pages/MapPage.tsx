@@ -241,7 +241,7 @@ export default function MapPage() {
   const [networkGeneration, setNetworkGeneration] = useState<NetworkGeneration>("AUTO");
   const watchIdRef = useRef<number | null>(null);
   const lastLoggedLocationRef = useRef<{ lat: number; lng: number } | null>(null);
-
+const [modelInfo, setModelInfo] = useState<{ trained_on: number; buffer_pending: number } | null>(null);
 const [colorMode, setColorMode] = useState<MapColorMode>("signal");
 const [networkFilter, setNetworkFilter] = useState<string>("ALL");
 const [areaReport, setAreaReport] = useState<{
@@ -266,9 +266,11 @@ const [isLoadingReport, setIsLoadingReport] = useState(false);
   useEffect(() => {
   setReadings(loadLocalReadings());
   fetchHeatmap();
+  fetchModelStatus();
   const debouncedFetch = debounce(fetchHeatmap, 500);
   const refresh = setInterval(debouncedFetch, 15000);
-  return () => clearInterval(refresh);
+  const modelRefresh = setInterval(fetchModelStatus, 30000);
+  return () => { clearInterval(refresh); clearInterval(modelRefresh); };
 }, []);
 
   useEffect(() => {
@@ -423,7 +425,13 @@ const [isLoadingReport, setIsLoadingReport] = useState(false);
     setLogging(false);
     setStatus("Session ended");
   }
-
+async function fetchModelStatus() {
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"}/api/ml/status`);
+    const data = await res.json();
+    if (data.success) setModelInfo({ trained_on: data.trained_on, buffer_pending: data.buffer_pending });
+  } catch {}
+}
 async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
   if (nearby.length === 0) {
     setStatus(`No data at ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
@@ -663,6 +671,24 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
     }
   </MapContainer>
 </section>
+{/* ML Status Badge */}
+<div style={{
+  position: "fixed", bottom: "1.5rem", right: "1.5rem",
+  background: "#0d1f0d", border: "1px solid #22c55e33",
+  borderRadius: "10px", padding: "0.6rem 1rem",
+  fontSize: "0.72rem", color: "#aaa", zIndex: 9999,
+  display: "flex", flexDirection: "column", gap: "0.2rem",
+  boxShadow: "0 0 12px #22c55e22"
+}}>
+  <span style={{ color: "#22c55e", fontWeight: 700, fontSize: "0.78rem" }}>
+    🤖 XGBoost Active
+  </span>
+  <span>Trained on <strong style={{ color: "#fff" }}>{(modelInfo?.trained_on ?? 3000).toLocaleString()}</strong> readings</span>
+  <span>Auto-retrains every <strong style={{ color: "#fff" }}>50</strong> new submissions</span>
+  {modelInfo?.buffer_pending != null && modelInfo.buffer_pending > 0 && (
+    <span style={{ color: "#f59e0b" }}>⏳ {modelInfo.buffer_pending} pending in buffer</span>
+  )}
+</div>
     </div>
   );
 }
