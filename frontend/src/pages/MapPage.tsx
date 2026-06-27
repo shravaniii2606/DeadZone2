@@ -252,13 +252,13 @@ const [areaReport, setAreaReport] = useState<{
   deadZones: number;
   total: number;
   networkCounts: Record<string, number>;
-  networkProviderQuality: NetworkProviderQuality[];
   mlPrediction: {
     is_dead_zone: boolean;
     probability: number;
     risk_level: string;
     confidence: number;
     top_factor: string;
+    trained_on?: number;
   } | null;
 } | null>(null);
 const [isLoadingReport, setIsLoadingReport] = useState(false);
@@ -434,64 +434,49 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
   const avgSignal = nearby.reduce((s, r) => s + r.signal_strength, 0) / nearby.length;
   const networkCounts: Record<string, number> = {};
   const operatorCounts: Record<string, number> = {};
-  const qualityGroups = new Map<string, {
-    networkType: string;
-    provider: string;
-    total: number;
-    signalSum: number;
-  }>();
   nearby.forEach((r) => {
     const nt = r.network_type?.toLowerCase() ?? "unknown";
-    const provider = r.operator || "unknown";
     networkCounts[nt] = (networkCounts[nt] ?? 0) + 1;
-    operatorCounts[provider] = (operatorCounts[provider] ?? 0) + 1;
-    const groupKey = `${nt}-${provider}`;
-    const group = qualityGroups.get(groupKey) ?? {
-      networkType: nt,
-      provider,
-      total: 0,
-      signalSum: 0,
-    };
-    group.total += 1;
-    group.signalSum += r.signal_strength;
-    qualityGroups.set(groupKey, group);
+    operatorCounts[r.operator] = (operatorCounts[r.operator] ?? 0) + 1;
   });
   const dominantNetwork = Object.entries(networkCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "unknown";
   const dominantOperator = Object.entries(operatorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "unknown";
-  const networkProviderQuality = Array.from(qualityGroups.values())
-    .map((group) => {
-      const groupAvgSignal = group.signalSum / group.total;
-      return {
-        networkType: group.networkType,
-        provider: group.provider,
-        total: group.total,
-        avgSignal: groupAvgSignal,
-        quality: getSignalLabel(groupAvgSignal),
-      };
-    })
-    .sort((a, b) => b.total - a.total);
+  const deadZones = nearby.filter((r) => r.signal_strength < -100).length;
 
-  // Show optimistic UI immediately with local data
+  // Calculate context from nearby readings
+  const withDownlink = nearby.filter(r => r.download_speed != null);
+  const withLatency = nearby.filter(r => r.latency != null);
+  const avgDownlink = withDownlink.length > 0
+    ? withDownlink.reduce((s, r) => s + (r.download_speed ?? 0), 0) / withDownlink.length
+    : 5.0;
+  const avgRtt = withLatency.length > 0
+    ? withLatency.reduce((s, r) => s + (r.latency ?? 0), 0) / withLatency.length
+    : 50.0;
+
+  // Show optimistic UI immediately
   setAreaReport({
     lat, lng, avgSignal, dominantNetwork, dominantOperator,
-    deadZones: nearby.filter((r) => r.signal_strength < -100).length,
-    total: nearby.length, networkCounts, networkProviderQuality, mlPrediction: null,
+    deadZones, total: nearby.length, networkCounts, mlPrediction: null,
   });
   setStatus(`Area report: ${nearby.length} readings`);
 
-  // Then fetch ML prediction in background
+  // Fetch ML prediction with real context
   setIsLoadingReport(true);
   try {
-    const data = await api.getAreaReport(lat, lng, 500, dominantNetwork);
+    const data = await api.getAreaReport(lat, lng, 500, dominantNetwork, {
+      avgSignal,
+      badReadingRatio: deadZones / nearby.length,
+      totalReadings: nearby.length,
+      downlink: avgDownlink,
+      rtt: avgRtt,
+    });
     setAreaReport((prev) => prev ? { ...prev, mlPrediction: data.ml_prediction ?? null } : prev);
   } catch {
-    // ML failed silently — area report still shows without it
+    // silent fail
   } finally {
     setIsLoadingReport(false);
   }
 }
-
-
   return (
     <div className="page-stack">
       <section className="page-hero">
@@ -617,6 +602,7 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
     <small style={{ opacity: 0.6 }}>🤖 ML Prediction</small>
     <p style={{ fontWeight: 700, margin: 0, opacity: 0.4 }}>Analyzing...</p>
   </div>
+
 ) : areaReport.mlPrediction ? (
   <div style={{ borderLeft: `3px solid ${areaReport.mlPrediction.risk_level === "HIGH" ? "#ef4444" : areaReport.mlPrediction.risk_level === "MEDIUM" ? "#f59e0b" : "#22c55e"}`, paddingLeft: "0.75rem" }}>
     <small style={{ opacity: 0.6 }}>🤖 ML Prediction</small>
@@ -626,7 +612,8 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
     }}>
       {areaReport.mlPrediction.risk_level} RISK — {Math.round(areaReport.mlPrediction.probability * 100)}%
     </p>
-    <small style={{ opacity: 0.5 }}>Confidence: {areaReport.mlPrediction.confidence}% · Key factor: {areaReport.mlPrediction.top_factor}</small>
+
+  <small style={{ opacity: 0.5 }}>Confidence: {areaReport.mlPrediction.confidence}% · Key factor: {areaReport.mlPrediction.top_factor} · Trained on: {areaReport.mlPrediction.trained_on?.toLocaleString()} readings</small>
   </div>
 ) : null}
         <div><small style={{ opacity: 0.6 }}>Breakdown</small>

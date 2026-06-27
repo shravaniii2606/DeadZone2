@@ -106,15 +106,22 @@ class DeadZonePredictor:
             logger.error(f"Retrain failed: {e}")
 
     def predict(self, lat: float, lng: float, network_type: str,
-                downlink: float = 5.0, rtt: float = 50.0, hour: int = 12) -> dict:
+            downlink: float = 5.0, rtt: float = 50.0, hour: int = 12,
+            avg_signal: float = None) -> dict:
         try:
             network_enc = self._encode_network(network_type)
-            X = np.array([[lat, lng, hour, network_enc, downlink, rtt]])
+            
+            if (downlink <= 5.0 and rtt <= 50.0) and avg_signal is not None:
+                if avg_signal >= -70: downlink = 20.0
+                elif avg_signal >= -85: downlink = 8.0
+                elif avg_signal >= -100: downlink = 2.0
+                else: downlink = 0.3
+                rtt = max(20, min(500, int((-avg_signal - 70) * 5)))
 
+            X = np.array([[lat, lng, hour, network_enc, downlink, rtt]])
             prob = float(self.model.predict_proba(X)[0][1])
             prediction = int(self.model.predict(X)[0])
 
-            # XGBoost feature importance
             importance = self.model.feature_importances_
             feature_names = ["location_lat", "location_lng", "time_of_day",
                            "network_type", "downlink_speed", "latency"]
@@ -131,12 +138,8 @@ class DeadZonePredictor:
             }
         except Exception as e:
             return {
-                "is_dead_zone": False,
-                "probability": 0.0,
-                "risk_level": "UNKNOWN",
-                "confidence": 0.0,
-                "top_factor": "error",
-                "model": "XGBoost-v1",
-                "trained_on": self.total_trained_on,
-                "error": str(e)
+                "is_dead_zone": False, "probability": 0.0,
+                "risk_level": "UNKNOWN", "confidence": 0.0,
+                "top_factor": "error", "model": "XGBoost-v1",
+                "trained_on": self.total_trained_on, "error": str(e)
             }

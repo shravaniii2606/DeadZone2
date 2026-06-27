@@ -79,10 +79,10 @@ async def get_area_report(
 
         total = len(readings)
         avg_signal_value = (
-            avg_signal
-            if avg_signal is not None
-            else (sum(r["signal_strength"] for r in readings) / total if total else None)
-        )
+    avg_signal
+    if avg_signal is not None
+    else (sum(r["signal_strength"] for r in readings) / total if total else None)
+)
         bad_count = sum(1 for r in readings if r["signal_strength"] < -100)
         bad_reading_ratio_value = (
             bad_reading_ratio
@@ -132,15 +132,13 @@ async def get_area_report(
         hour = datetime.now().hour
         predictor = DeadZonePredictor.get()
         ml_result = predictor.predict(
-            lat=lat, lng=lng,
-            network_type=dominant_network,
-            downlink=downlink,
-            rtt=rtt,
-            hour=hour,
-            avg_signal=avg_signal_value,
-            bad_reading_ratio=bad_reading_ratio_value,
-            sample_size=sample_size
-        )
+    lat=lat, lng=lng,
+    network_type=dominant_network,
+    downlink=downlink,
+    rtt=rtt,
+    hour=hour,
+    avg_signal=avg_signal_value  # pass this
+)
 
         return {
             "success": True,
