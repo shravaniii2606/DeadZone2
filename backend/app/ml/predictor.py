@@ -112,11 +112,11 @@ class DeadZonePredictor:
             network_enc = self._encode_network(network_type)
             
             if (downlink <= 5.0 and rtt <= 50.0) and avg_signal is not None:
-                if avg_signal >= -70: downlink = 20.0
-                elif avg_signal >= -85: downlink = 8.0
-                elif avg_signal >= -100: downlink = 2.0
-                else: downlink = 0.3
-                rtt = max(20, min(500, int((-avg_signal - 70) * 5)))
+              if avg_signal >= -70: downlink = 20.0
+              elif avg_signal >= -85: downlink = 8.0
+              elif avg_signal >= -100: downlink = 2.0
+              else: downlink = 0.3
+              rtt = max(20, min(500, int((-avg_signal - 70) * 5)))
 
             X = np.array([[lat, lng, hour, network_enc, downlink, rtt]])
             prob = float(self.model.predict_proba(X)[0][1])

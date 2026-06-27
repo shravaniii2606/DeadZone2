@@ -131,14 +131,21 @@ async def get_area_report(
         # ML prediction
         hour = datetime.now().hour
         predictor = DeadZonePredictor.get()
+
+        # Detect scale and normalize to dBm
+        if avg_signal_value is not None and avg_signal_value > 0:
+            avg_signal_dbm = -120 + (avg_signal_value / 100) * 65
+        else:
+            avg_signal_dbm = avg_signal_value
+
         ml_result = predictor.predict(
-    lat=lat, lng=lng,
-    network_type=dominant_network,
-    downlink=downlink,
-    rtt=rtt,
-    hour=hour,
-    avg_signal=avg_signal_value  # pass this
-)
+            lat=lat, lng=lng,
+            network_type=dominant_network,
+            downlink=downlink,
+            rtt=rtt,
+            hour=hour,
+            avg_signal=avg_signal_dbm
+        )
 
         return {
             "success": True,
