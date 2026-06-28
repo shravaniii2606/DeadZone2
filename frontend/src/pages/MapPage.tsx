@@ -35,7 +35,7 @@ const signalLegend = [
   { label: "Good",      color: "#84cc16", range: "50–70" },
   { label: "Moderate",  color: "#f59e0b", range: "30–50" },
   { label: "Weak",      color: "#ef4444", range: "15–30" },
-  { label: "Dead Zone", color: "#6b7280", range: "< 15"  },
+  
 ];
 const LOCAL_READINGS_KEY = "deadzone.localReadings";
 
