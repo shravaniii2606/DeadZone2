@@ -3,6 +3,8 @@ import { CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } fr
 import "leaflet/dist/leaflet.css";
 import { api } from "../api";
 import { debounce } from "../api";
+import "leaflet.heat";
+import L from "leaflet";
 interface Reading {
   id: string;
   latitude: number;
@@ -196,7 +198,39 @@ function getGpsErrorMessage(error: GeolocationPositionError): string {
 
   return "GPS error";
 }
+function HeatmapLayer({ readings }: { readings: Reading[] }) {
+  const map = useMap();
+  const heatRef = useRef<L.HeatLayer | null>(null);
 
+  useEffect(() => {
+    const points: [number, number, number][] = readings.map((r) => {
+      const intensity = Math.max(0, Math.min(1, (r.signal_strength + 120) / 65));
+      return [r.latitude, r.longitude, 1 - intensity];
+    });
+
+    if (heatRef.current) map.removeLayer(heatRef.current);
+    if (points.length === 0) return;
+
+    // @ts-ignore
+    heatRef.current = L.heatLayer(points, {
+      radius: 30,
+      blur: 25,
+      maxZoom: 17,
+      minOpacity: 0.4,
+      gradient: {
+        0.0: "#22c55e",
+        0.4: "#84cc16",
+        0.6: "#f59e0b",
+        0.8: "#ef4444",
+        1.0: "#7f1d1d",
+      },
+    });
+    heatRef.current.addTo(map);
+    return () => { if (heatRef.current) map.removeLayer(heatRef.current); };
+  }, [readings, map]);
+
+  return null;
+}
 function MapClickHandler({ readings, onAreaClick }: {
   readings: Reading[];
   onAreaClick: (lat: number, lng: number, nearby: Reading[]) => void;
@@ -223,7 +257,7 @@ function MapFocusHandler({ focus }: { focus: [number, number] | null }) {
 
   return null;
 }
-type MapColorMode = "signal" | "network";
+type MapColorMode = "signal" | "network" | "heatmap";
 type NetworkProviderQuality = {
   networkType: string;
   provider: string;
@@ -538,16 +572,20 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
 {/* Color mode + network filter */}
 <section className="panel" style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center", padding: "0.6rem 1rem" }}>
   <div style={{ display: "flex", gap: "0.4rem" }}>
-    <span style={{ opacity: 0.5, fontSize: "0.8rem", alignSelf: "center" }}>Color by:</span>
-    {(["signal", "network"] as MapColorMode[]).map((m) => (
-      <button key={m} onClick={() => setColorMode(m)} style={{
+    <span style={{ opacity: 0.5, fontSize: "0.8rem", alignSelf: "center" }}>View:</span>
+    {([
+      { mode: "signal", label: "📶 Signal" },
+      { mode: "network", label: "📡 Network" },
+      { mode: "heatmap", label: "🌡️ Heatmap" },
+    ] as { mode: MapColorMode; label: string }[]).map(({ mode, label }) => (
+      <button key={mode} onClick={() => setColorMode(mode)} style={{
         padding: "0.25rem 0.7rem", borderRadius: "999px", border: "1px solid",
         cursor: "pointer", fontSize: "0.78rem", fontWeight: 600,
-        background: colorMode === m ? "#fff" : "transparent",
-        color: colorMode === m ? "#000" : "#fff",
-        borderColor: colorMode === m ? "#fff" : "#555",
+        background: colorMode === mode ? "#fff" : "transparent",
+        color: colorMode === mode ? "#000" : "#fff",
+        borderColor: colorMode === mode ? "#fff" : "#555",
       }}>
-        {m === "signal" ? "📶 Signal" : "📡 Network Type"}
+        {label}
       </button>
     ))}
   </div>
@@ -649,37 +687,42 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
 )}
       <section className="map-panel">
   <MapContainer center={[19.076, 72.8777]} zoom={12} style={{ height: "100%", width: "100%", background: "#0a0f0a" }}>
-    <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" attribution='&copy; <a href="https://carto.com/">CARTO</a>' />
-    <MapClickHandler readings={readings} onAreaClick={handleAreaClick} />
-    <MapFocusHandler focus={focusPoint} />
-    {readings
-      .filter((r) => colorMode === "signal" || networkFilter === "ALL" || r.network_type?.toLowerCase() === networkFilter)
-      .map((r) => {
-        const color = colorMode === "network" ? getNetworkColor(r.network_type) : getSignalColor(r.signal_strength);
-        return (
-          <CircleMarker
-            key={r.id}
-            center={[r.latitude, r.longitude]}
-            radius={8}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.82, weight: 1.5 }}
-          >
-            <Popup>
-              <div className="map-popup">
-                <strong style={{ color }}>{getSignalLabel(r.signal_strength)}</strong>
-                <p>📡 Network: <strong>{getNetworkLabel(r.network_type)}</strong></p>
-                <p>📶 Signal: {r.signal_strength}</p>
-                {r.download_speed != null && <p>⬇ Downlink: {r.download_speed} Mbps</p>}
-                {r.latency != null && <p>⏱ Latency: {r.latency} ms</p>}
-                <p>🏢 Operator: {r.operator}</p>
-                {!r.synced && <p>💾 Saved locally</p>}
-                <small>{new Date(r.created_at).toLocaleString()}</small>
-              </div>
-            </Popup>
-          </CircleMarker>
-        );
-      })
-    }
-  </MapContainer>
+  <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" attribution='&copy; <a href="https://carto.com/">CARTO</a>' />
+  <MapClickHandler readings={readings} onAreaClick={handleAreaClick} />
+  <MapFocusHandler focus={focusPoint} />
+  
+  {/* Heatmap layer — only in heatmap mode */}
+  {colorMode === "heatmap" && <HeatmapLayer readings={readings} />}
+
+  {/* Dots — hidden in heatmap mode */}
+  {colorMode !== "heatmap" && readings
+    .filter((r) => colorMode === "signal" || networkFilter === "ALL" || r.network_type?.toLowerCase() === networkFilter)
+    .map((r) => {
+      const color = colorMode === "network" ? getNetworkColor(r.network_type) : getSignalColor(r.signal_strength);
+      return (
+        <CircleMarker
+          key={r.id}
+          center={[r.latitude, r.longitude]}
+          radius={8}
+          pathOptions={{ color, fillColor: color, fillOpacity: 0.82, weight: 1.5 }}
+        >
+          <Popup>
+            <div className="map-popup">
+              <strong style={{ color }}>{getSignalLabel(r.signal_strength)}</strong>
+              <p>📡 Network: <strong>{getNetworkLabel(r.network_type)}</strong></p>
+              <p>📶 Signal: {r.signal_strength}</p>
+              {r.download_speed != null && <p>⬇ Downlink: {r.download_speed} Mbps</p>}
+              {r.latency != null && <p>⏱ Latency: {r.latency} ms</p>}
+              <p>🏢 Operator: {r.operator}</p>
+              {!r.synced && <p>💾 Saved locally</p>}
+              <small>{new Date(r.created_at).toLocaleString()}</small>
+            </div>
+          </Popup>
+        </CircleMarker>
+      );
+    })
+  }
+</MapContainer>
 </section>
 {/* ML Status Badge */}
 <div style={{
