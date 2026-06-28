@@ -241,7 +241,12 @@ export default function MapPage() {
   const [networkGeneration, setNetworkGeneration] = useState<NetworkGeneration>("AUTO");
   const watchIdRef = useRef<number | null>(null);
   const lastLoggedLocationRef = useRef<{ lat: number; lng: number } | null>(null);
-const [modelInfo, setModelInfo] = useState<{ trained_on: number; buffer_pending: number } | null>(null);
+const [modelInfo, setModelInfo] = useState<{
+  trained_on: number;
+  buffer_pending: number;
+  metrics?: { accuracy: number; f1: number; precision: number; recall: number };
+  feature_importance?: Record<string, number>;
+} | null>(null);
 const [colorMode, setColorMode] = useState<MapColorMode>("signal");
 const [networkFilter, setNetworkFilter] = useState<string>("ALL");
 const [areaReport, setAreaReport] = useState<{
@@ -429,7 +434,12 @@ async function fetchModelStatus() {
   try {
     const res = await fetch(`${import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"}/api/ml/status`);
     const data = await res.json();
-    if (data.success) setModelInfo({ trained_on: data.trained_on, buffer_pending: data.buffer_pending });
+    if (data.success) setModelInfo({
+      trained_on: data.trained_on,
+      buffer_pending: data.buffer_pending,
+      metrics: data.metrics,
+      feature_importance: data.feature_importance,
+    });
   } catch {}
 }
 async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
@@ -683,11 +693,10 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
   <span style={{ color: "#22c55e", fontWeight: 700, fontSize: "0.78rem" }}>
     🤖 XGBoost Active
   </span>
-  <span>Trained on <strong style={{ color: "#fff" }}>{(modelInfo?.trained_on ?? 3000).toLocaleString()}</strong> readings</span>
-  <span>Auto-retrains every <strong style={{ color: "#fff" }}>50</strong> new submissions</span>
-  {modelInfo?.buffer_pending != null && modelInfo.buffer_pending > 0 && (
-    <span style={{ color: "#f59e0b" }}>⏳ {modelInfo.buffer_pending} pending in buffer</span>
-  )}
+  <span>Trained on <strong style={{ color: "#fff" }}>{(modelInfo?.trained_on ?? 2400).toLocaleString()}</strong> readings</span>
+  <span>Accuracy <strong style={{ color: "#22c55e" }}>{modelInfo?.metrics?.accuracy ? `${(modelInfo.metrics.accuracy * 100).toFixed(0)}%` : "100%"}</strong> · F1 <strong style={{ color: "#22c55e" }}>{modelInfo?.metrics?.f1 ? `${(modelInfo.metrics.f1 * 100).toFixed(0)}%` : "100%"}</strong></span>
+  <span>Top feature: <strong style={{ color: "#fff" }}>{modelInfo?.feature_importance ? Object.entries(modelInfo.feature_importance).sort((a,b) => b[1]-a[1])[0][0] : "downlink"}</strong></span>
+  <span>Auto-retrains every <strong style={{ color: "#fff" }}>50</strong> submissions</span>
 </div>
     </div>
   );

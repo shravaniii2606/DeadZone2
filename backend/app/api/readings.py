@@ -1,26 +1,27 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from app.models.schemas import SignalReading
 from app.db.supabase import supabase
 from app.ml.predictor import DeadZonePredictor
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 @router.post("/readings")
-async def submit_reading(reading: SignalReading):
+@limiter.limit("30/minute")
+async def submit_reading(request: Request, reading: SignalReading):
     if not supabase:
         raise HTTPException(status_code=503, detail="Supabase not configured.")
-
     try:
         data = {
             "latitude": reading.latitude,
             "longitude": reading.longitude,
             "signal_strength": reading.signal_strength,
-            "network_type": reading.network_type,
+            "network_type": (reading.network_type or "unknown").upper(), 
             "operator_name": reading.operator,
         }
         result = supabase.table("signal_readings").insert(data).execute()
-
-        # Incremental learning — model learns from every new reading
         try:
             predictor = DeadZonePredictor.get()
             predictor.learn(
@@ -32,8 +33,7 @@ async def submit_reading(reading: SignalReading):
                 is_dead_zone=(reading.signal_strength < -100)
             )
         except Exception:
-            pass  # never block a reading for ML
-
+            pass
         return {"success": True, "data": result.data[0]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -43,7 +43,6 @@ async def submit_reading(reading: SignalReading):
 async def get_heatmap(limit: int = 10000):
     if not supabase:
         raise HTTPException(status_code=503, detail="Supabase not configured.")
-
     try:
         result = (
             supabase.table("signal_readings")
@@ -64,8 +63,6 @@ async def get_heatmap(limit: int = 10000):
             }
             for row in result.data
         ]
-
-        # Include model stats in response
         try:
             predictor = DeadZonePredictor.get()
             model_info = {
@@ -75,10 +72,11 @@ async def get_heatmap(limit: int = 10000):
             }
         except Exception:
             model_info = {}
-
         return {"success": True, "count": len(normalized), "data": normalized, "model_info": model_info}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/ml/status")
 async def ml_status():
     try:
@@ -89,7 +87,9 @@ async def ml_status():
             "trained_on": predictor.total_trained_on,
             "buffer_pending": len(predictor._X_buffer),
             "retrains_at": 50,
-            "status": "active"
+            "status": "active",
+            "metrics": predictor.metrics,
+            "feature_importance": predictor.feature_importance,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
