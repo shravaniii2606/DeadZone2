@@ -5,6 +5,7 @@ import { api } from "../api";
 import { debounce } from "../api";
 import "leaflet.heat";
 import L from "leaflet";
+import { supabase } from "../supabase";
 interface Reading {
   id: string;
   latitude: number;
@@ -306,12 +307,40 @@ const [isLoadingReport, setIsLoadingReport] = useState(false);
   setReadings(loadLocalReadings());
   fetchHeatmap();
   fetchModelStatus();
+
   const debouncedFetch = debounce(fetchHeatmap, 500);
   const refresh = setInterval(debouncedFetch, 15000);
   const modelRefresh = setInterval(fetchModelStatus, 30000);
-  return () => { clearInterval(refresh); clearInterval(modelRefresh); };
-}, []);
 
+  const channel = supabase
+    .channel("signal_readings_live")
+    .on("postgres_changes", {
+      event: "INSERT",
+      schema: "public",
+      table: "signal_readings",
+    }, (payload) => {
+      const row = payload.new as Record<string, unknown>;
+      const newReading = normalizeReading({
+        id: row.id as string,
+        lat: row.lat as number,
+        lng: row.lng as number,
+        signal_strength: row.signal_strength as number,
+        network_type: row.effective_type as string,
+        operator: row.operator as string,
+        timestamp: row.timestamp as string,
+      });
+      if (newReading) {
+        setReadings((current) => mergeReadings([{ ...newReading, synced: true }], current));
+      }
+    })
+    .subscribe();
+
+  return () => {
+    clearInterval(refresh);
+    clearInterval(modelRefresh);
+    supabase.removeChannel(channel);
+  };
+}, []);
   useEffect(() => {
     saveLocalReadings(readings);
   }, [readings]);
