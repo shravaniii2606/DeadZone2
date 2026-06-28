@@ -759,16 +759,35 @@ async function handleAreaClick(lat: number, lng: number, nearby: Reading[]) {
   background: "#0d1f0d", border: "1px solid #22c55e33",
   borderRadius: "10px", padding: "0.6rem 1rem",
   fontSize: "0.72rem", color: "#aaa", zIndex: 9999,
-  display: "flex", flexDirection: "column", gap: "0.2rem",
-  boxShadow: "0 0 12px #22c55e22"
+  display: "flex", flexDirection: "column", gap: "0.3rem",
+  boxShadow: "0 0 12px #22c55e22", minWidth: "200px"
 }}>
   <span style={{ color: "#22c55e", fontWeight: 700, fontSize: "0.78rem" }}>
     🤖 XGBoost Active
   </span>
   <span>Trained on <strong style={{ color: "#fff" }}>{(modelInfo?.trained_on ?? 2400).toLocaleString()}</strong> readings</span>
   <span>Accuracy <strong style={{ color: "#22c55e" }}>{modelInfo?.metrics?.accuracy ? `${(modelInfo.metrics.accuracy * 100).toFixed(0)}%` : "100%"}</strong> · F1 <strong style={{ color: "#22c55e" }}>{modelInfo?.metrics?.f1 ? `${(modelInfo.metrics.f1 * 100).toFixed(0)}%` : "100%"}</strong></span>
-  <span>Top feature: <strong style={{ color: "#fff" }}>{modelInfo?.feature_importance ? Object.entries(modelInfo.feature_importance).sort((a,b) => b[1]-a[1])[0][0] : "downlink"}</strong></span>
-  <span>Auto-retrains every <strong style={{ color: "#fff" }}>50</strong> submissions</span>
+  <span style={{ opacity: 0.5, fontSize: "0.68rem", marginTop: "0.2rem" }}>FEATURE IMPORTANCE</span>
+  {modelInfo?.feature_importance && Object.entries(modelInfo.feature_importance)
+    .sort((a, b) => b[1] - a[1])
+    .map(([feature, importance]) => (
+      <div key={feature} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+        <span style={{ width: "70px", fontSize: "0.65rem", opacity: 0.7 }}>{feature}</span>
+        <div style={{ flex: 1, height: "4px", background: "#1a1a1a", borderRadius: "2px" }}>
+          <div style={{
+            width: `${(importance * 100).toFixed(0)}%`,
+            height: "100%",
+            background: importance > 0.3 ? "#22c55e" : importance > 0.1 ? "#f59e0b" : "#6b7280",
+            borderRadius: "2px"
+          }} />
+        </div>
+        <span style={{ width: "35px", fontSize: "0.65rem", textAlign: "right" }}>
+          {(importance * 100).toFixed(0)}%
+        </span>
+      </div>
+    ))
+  }
+  <span style={{ opacity: 0.4, fontSize: "0.65rem" }}>Auto-retrains every 50 submissions</span>
 </div>
     </div>
   );
