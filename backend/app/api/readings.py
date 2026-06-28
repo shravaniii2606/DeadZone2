@@ -8,17 +8,31 @@ from app.ml.predictor import DeadZonePredictor
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
+def is_valid_reading(reading: SignalReading) -> tuple[bool, str]:
+    if not (18.5 <= reading.latitude <= 19.5):
+        return False, "Coordinates outside Mumbai MMR bounds"
+    if not (72.5 <= reading.longitude <= 73.5):
+        return False, "Coordinates outside Mumbai MMR bounds"
+    if not (-120 <= reading.signal_strength <= -30):
+        return False, f"Signal strength {reading.signal_strength} outside valid dBm range (-120 to -30)"
+    return True, "ok"
+
 @router.post("/readings")
 @limiter.limit("30/minute")
 async def submit_reading(request: Request, reading: SignalReading):
     if not supabase:
         raise HTTPException(status_code=503, detail="Supabase not configured.")
+
+    valid, reason = is_valid_reading(reading)
+    if not valid:
+        raise HTTPException(status_code=422, detail=f"Reading rejected: {reason}")
+
     try:
         data = {
             "latitude": reading.latitude,
             "longitude": reading.longitude,
             "signal_strength": reading.signal_strength,
-            "network_type": (reading.network_type or "unknown").upper(), 
+            "network_type": (reading.network_type or "unknown").upper(),
             "operator_name": reading.operator,
         }
         result = supabase.table("signal_readings").insert(data).execute()
